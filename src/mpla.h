@@ -20,13 +20,32 @@
 #define mpla_h__
 
 
+struct mpla_instance
+{
+	MPI_Comm comm;
+	int proc_count;
+	int proc_rows;
+	int proc_cols;
+	int cur_proc_coord[2];
+	int cur_proc_row;
+	int cur_proc_col;	
+	bool is_parent; 
+};
+
 
 struct mpla_matrix
 {
 	double* data;
-	int m,n;
-	int* row_distr;
-	int* row_offset;	
+	int mat_row_count, mat_col_count;
+	int cur_proc_row_count;
+	int cur_proc_col_count;
+	int cur_proc_row_offset;
+	int cur_proc_col_offset;
+	int** proc_row_count;
+	int** proc_col_count;
+	int** proc_row_offset;
+	int** proc_col_offset;
+	
 };
 
 struct mpla_vector
