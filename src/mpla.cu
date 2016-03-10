@@ -42,18 +42,20 @@ void mpla_init_instance(struct mpla_instance* instance, MPIComm comm)
 	// compute the process grid
 	int dims[2]; 
 	dims[0]=dims[1]=0;
-	MPI_DIMS_CREATE(instance->proc_count, 2, dims);
+	MPI_Dims_create(instance->proc_count, 2, dims);
 	instance->proc_rows = dims[0];
 	instance->proc_cols = dims[1];
 
 	// create cartesian communicator and retrieve cartesian coordinates
 	int periods[2];
 	periods[0]=periods[1]=0;
-	MPI_CART_CREATE(comm, 2, dims, periods, 0, &(instance->comm));
+	MPI_Cart_create(comm, 2, dims, periods, 0, &(instance->comm));
 	int cur_proc_coord[2];
-	MPI_CART_GET(instance->comm, 2, dims, periods, cur_proc_coord);
+	MPI_Cart_get(instance->comm, 2, dims, periods, cur_proc_coord);
 	instance->cur_proc_row = cur_proc_coord[0];
 	instance->cur_proc_col = cur_proc_coord[1];
+
+	cublasCreate(&(instance->handle));
 	
 }
 
@@ -124,12 +126,218 @@ void mpla_init_matrix(struct mpla_matrix* matrix, struct mpla_instance* instance
 	cudaMalloc((void**)&(matrix->data), sizeof(double)*matrix->cur_proc_row_count*matrix->cur_proc_col_count);
 }
 
-
-void mpla_dgemv(struct mpla_vector* b, struct mpla_matrix* A, struct mpla_vector* x)
+void mpla_init_vector(struct mpla_vector* vector, struct mpla_instance* instance, int vec_row_count)
 {
+	// setting global vector size
+	vector->vec_row_count = vec_row_count;
+
+	// allocating memory for process-wise vector information
+	vector->proc_row_count = new int*[instance->proc_rows];
+	vector->proc_row_offset = new int*[instance->proc_rows];
+	for (int i=0; i<instance->proc_rows; i++)
+	{
+		vector->proc_row_count[i] = new int[instance->proc_cols];
+		vector->proc_row_offset[i] = new int[instance->proc_cols];
+	}
+
+	// computing general row block sizes
+	int filled_row_block_size = ceil((float)vec_row_count / (float)(instance->proc_rows));
+	int filled_row_block_count = vec_row_count / filled_row_block_size;
+	int last_row_block_size =  vec_row_count % filled_row_block_size;
+
+	// computing process-wise block row / column counts
+	for (int i=0; i < instance->proc_rows; i++)
+	{
+		for (int j=0; j < instance->proc_cols; j++)
+		{
+			if ((i==(instance->proc_rows-1)) && (last_row_block_size>0)) // handling last row block which is only partially filled
+				vector->proc_row_count[i][j] = last_row_block_size;
+			else
+				vector->proc_row_count[i][j] = filled_row_block_size;
+		}
+	}
+
+	// computing process-wise block row / column offsets
+	vector->proc_row_offset[0][0] = 0;
+	for (int i=1; i < instance->proc_rows; i++)
+		for (int j=1; j < instance->proc_cols; j++)
+			vector->proc_row_offset[i][j] = vector->proc_row_offset[i-1][j] + vector->proc_row_count[i-1][j];
 	
+	// retrieving local data for the current process
+	vector->cur_proc_row_count = vector->proc_row_count[instance->cur_proc_row][instance->cur_proc_col];
+	vector->cur_proc_row_offset = vector->proc_row_offset[instance->cur_proc_row][instance->cur_proc_col];
+
+	// allocating matrix data storage
+	cudaMalloc((void**)&(vector->data), sizeof(double)*vector->cur_proc_row_count*vector->cur_proc_col_count);
+}
+
+void mpla_init_vector_for_block_rows(struct mpla_vector* vector, struct mpla_instance* instance, int vec_row_count)
+{
+	// setting global vector size
+	vector->vec_row_count = vec_row_count;
+
+	// allocating memory for process-wise vector information
+	vector->proc_row_count = new int*[instance->proc_rows];
+	vector->proc_row_offset = new int*[instance->proc_rows];
+	for (int i=0; i<instance->proc_rows; i++)
+	{
+		vector->proc_row_count[i] = new int[instance->proc_cols];
+		vector->proc_row_offset[i] = new int[instance->proc_cols];
+	}
+
+	// computing general row block sizes
+	int filled_row_block_size = ceil((float)vec_row_count / (float)(instance->proc_cols));
+	int filled_row_block_count = vec_row_count / filled_row_block_size;
+	int last_row_block_size =  vec_row_count % filled_row_block_size;
+
+	// computing process-wise block row / column counts
+	for (int i=0; i < instance->proc_rows; i++)
+	{
+		for (int j=0; j < instance->proc_cols; j++)
+		{
+			if ((j==(instance->proc_cols-1)) && (last_row_block_size>0)) // handling last row block which is only partially filled
+				vector->proc_row_count[i][j] = last_row_block_size;
+			else
+				vector->proc_row_count[i][j] = filled_row_block_size;
+		}
+	}
+
+	// computing process-wise block row / column offsets
+	vector->proc_row_offset[0][0] = 0;
+	for (int i=1; i < instance->proc_rows; i++)
+		for (int j=1; j < instance->proc_cols; j++)
+			vector->proc_row_offset[i][j] = vector->proc_row_offset[i][j-1] + vector->proc_row_count[i][j-1];
+	
+	// retrieving local data for the current process
+	vector->cur_proc_row_count = vector->proc_row_count[instance->cur_proc_row][instance->cur_proc_col];
+	vector->cur_proc_row_offset = vector->proc_row_offset[instance->cur_proc_row][instance->cur_proc_col];
+
+	// allocating matrix data storage
+	cudaMalloc((void**)&(vector->data), sizeof(double)*vector->cur_proc_row_count*vector->cur_proc_col_count);
+}
 
 
+
+void mpla_redistribute_vector_for_dgesv(struct mpla_vector* b_redist, struct mpla_vector* b, struct mpla_matrix* A, struct mpla_instance* instance)
+{
+	// attention: this code does no correctness check for the input data
+
+
+
+//	b_redist->vec_row_count = b->vec_row_count;
+//
+//	// allocating memory for process-wise vector information
+//	vector->proc_row_count = new int*[instance->proc_rows];
+//	vector->proc_row_offset = new int*[instance->proc_rows];
+//	for (int i=0; i<instance->proc_rows; i++)
+//	{
+//		b_redist->proc_row_count[i] = new int[instance->proc_cols];
+//		b_redist->proc_row_offset[i] = new int[instance->proc_cols];
+//	}
+//
+//	// set sizes of 
+//	for (int i=0; i<instance->proc_rows; i++)
+//	{
+//		for (int j=0; j<instance->proc_cols; j++)
+//		{
+//			b_redist->proc_row_count[i][j] = A->proc_col_count[i][j];
+//			b_redist->proc_row_offset[i][j] = A->proc_col_offset[i][j];
+//		}
+//	}
+//
+//	// retrieving local data for current process
+//	b_redist->cur_proc_row_count = A->cur_proc_col_count;
+//	b_redist->cur_proc_row_offset = A->cur_proc_col_offset;
+//
+//	// allocating temporary vector storage
+//	cudaMalloc((void*)&(b_redist->data), sizeof(double)*b_redist->cur_proc_row_count);
+
+	// WARNING: The following code is not efficient for a strong parallelization !!!!!
+
+	// create sub-communicator for each process column
+	int remain_dims[2];
+	remain_dims[0]=1;
+	remain_dims[1]=0;
+	MPI_Comm column_comm;
+	MPI_Cart_sub(instance->comm, remain_dims, &column_comm);
+	int column_rank;
+	MPI_Comm_rank(column_comm, &column_rank);
+	
+	// columnwise creation of the full vector
+	double* full_vector;
+	int* recvcounts = new int[instance->proc_rows];
+	int* displs = new int[instance->proc_rows];
+	for (int i=0; i<instance->proc_rows; i++)
+	{
+		recvcounts[i] = b->proc_row_count[i][b->cur_proc_col];
+		displs[i] = b->proc_row_offset[i][b->cur_proc_col];
+	}
+	cudaMalloc((void*)&full_vector, sizeof(double)*b->vec_row_count);
+	MPI_Allgatherv(b->data, b->cur_proc_row_count, MPI_DOUBLE, full_vector, recvcounts, displs, MPI_DOUBLE, column_comm);
+
+	// extract column-wise local part of full vector
+	cudaMemcpy(b_redist->data, &(full_vector[b_redist->cur_proc_row_offset]), sizeof(double)*b_dist->cur_proc_row_count, cudaMemcpyDeviceToDevice);
+
+	// memory cleanup
+	cudaFree(full_vector);
+}
+
+
+void mpla_free_vector(struct mpla_vector* x, struct mpla_instance* instance)
+{
+	cudaFree(x->data);
+	for (int i=0; i<instance->proc_rows; i++)
+	{
+		delete [] x->proc_row_count;
+		delete [] x->proc_row_offset;
+	}
+}
+
+void mpla_free_matrix(struct mpla_matrix* A, struct mpla_instance* instance)
+{
+	cudaFree(A->data);
+	for (int i=0; i<instance->proc_rows; i++)
+	{
+		delete [] A->proc_row_count;
+		delete [] A->proc_row_offset;
+		delete [] A->proc_col_count;
+		delete [] A->proc_col_offset;
+	}
+}
+
+void mpla_dgemv(struct mpla_vector* b, struct mpla_matrix* A, struct mpla_vector* x, struct mpla_instance* instance)
+{
+	double one = 1;
+	double zero = 0;
+
+	// allocate redistributed vector
+	struct mpla_vector x_redist;
+	mpla_init_vector_for_block_rows(&x_redist, instance, x->vec_row_count);
+	
+	// redistribute input vector with row-block parallel distribution to column-block parallel distribution
+	mpla_redistribute_vector_for_dgesv(&x_redist, x, A, instance);
+		
+	// computation core: matrix-vector product
+	cublasDgemv(*(instance->cublas_handle), CUBLAS_OP_N, A->cur_proc_row_count, A->cur_proc_col_count, 
+		    &one, A->data, A->cur_proc_row_count, x_redist->data, 1, &zero, b->data, 1);
+
+	
+	// create sub-communicator for each process row
+	int remain_dims[2];
+	remain_dims[0]=0;
+	remain_dims[1]=1;
+	MPI_Comm row_comm;
+	MPI_Cart_sub(instance->comm, remain_dims, &row_comm);
+
+	// summation of block row results
+	double* sum;
+	cudaMalloc((void*)&sum, sizeof(double)*x_redist->cur_proc_row_count);
+	MPI_REDUCE(b->data, sum, x_redist->cur_proc_row_count, MPI_DOUBLE, MPI_SUM, row_comm);
+	cudaMemcpy(b->data, sum, sizeof(double)*x_redist->cur_proc_row_count, cudaMemcpyDeviceToDevice);
+
+	// cleanup
+	cudaFree(sum);
+	mpla_free_vector(x_redist);
 }
 
 

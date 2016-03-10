@@ -29,7 +29,8 @@ struct mpla_instance
 	int cur_proc_coord[2];
 	int cur_proc_row;
 	int cur_proc_col;	
-	bool is_parent; 
+	bool is_parent;
+	cublasHandle_t cublas_handle;
 };
 
 
@@ -51,9 +52,11 @@ struct mpla_matrix
 struct mpla_vector
 {
 	double* data;
-	int m;
-	int* row_distr;
-	int* row_offset;	
+	int vec_row_count, vec_col_count;
+	int cur_proc_row_count;
+	int cur_proc_row_offset;
+	int** proc_row_count;
+	int** proc_row_offset;
 };
 
 
