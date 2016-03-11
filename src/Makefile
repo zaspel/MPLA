@@ -17,7 +17,7 @@
 
 
 default: shared
-	nvcc -g -I/home/zaspel/libs/openmpi/include -L/home/zaspel/libs/openmpi/lib -lmpi_cxx -lmpi -L. -lmpla -lcublas -o test_library test_library.cu
+	nvcc -g -I/home/zaspel/libs/openmpi/include -L/home/zaspel/libs/openmpi/lib -lcurand -lmpi_cxx -lmpi -L. -lmpla -lcublas -o benchmark_dgemv benchmark_dgemv.cu
 
 shared:
 	nvcc -g -I/home/zaspel/libs/openmpi/include -I/usr/local/cuda/include -L/home/zaspel/libs/openmpi/lib -lmpi_cxx -lmpi --ptxas-options=-v --compiler-options '-fPIC' -o libmpla.so --shared mpla.cu

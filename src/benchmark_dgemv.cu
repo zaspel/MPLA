@@ -17,6 +17,7 @@
 
 #include "mpla.h"
 #include "mpi.h"
+#include <curand.h>
 
 int idx(int i, int j, int m, int n)
 {
@@ -37,24 +38,10 @@ int main(int argc, char* argv[])
 	int m,n;
 	m=atoi(argv[1]);
 	n=atoi(argv[2]);
-	
-	double* A_h = new double[m*n];
-	for (int i=0; i<m*n; i++)
-		A_h[i] = i;
 
-	double* x_h = new double[n];
-	for (int i=0; i<n; i++)
-		x_h[i] = i;
-
-	double* Ax_h = new double[m];
-	for (int i=0; i<m; i++)
-	{
-		Ax_h[i]=0;
-		for (int j=0; j<n; j++)
-		{
-			Ax_h[i] += A_h[ idx(i,j,m,n) ] * x_h[j];
-		}		
-	}
+	int trials = 100;	
+	if (argc==4)
+		trials = atoi(argv[3]);
 
 	
 	MPI_Init( &argc, &argv );
@@ -73,58 +60,47 @@ int main(int argc, char* argv[])
 	struct mpla_vector Ax;
 	mpla_init_vector(&Ax, &instance, m);
 
-	// fill vector
-	cudaMemcpy(x.data, &(x_h[x.cur_proc_row_offset]), sizeof(double)*x.cur_proc_row_count, cudaMemcpyHostToDevice);
-	checkCUDAError("memcpy");
-	
-	
-	// fill matrix
-	double* Atmp = new double[A.cur_proc_row_count*A.cur_proc_col_count];
-	for (int i=A.cur_proc_row_offset; i<A.cur_proc_row_offset+A.cur_proc_row_count; i++)
-	{
-		for (int j=A.cur_proc_col_offset; j<A.cur_proc_col_offset+A.cur_proc_col_count; j++)
-		{
-			Atmp[ idx(i-A.cur_proc_row_offset,j-A.cur_proc_col_offset,A.cur_proc_row_count,A.cur_proc_col_count) ] = A_h[ idx(i,j,m,n) ];
-		}
-	}
-	cudaMemcpy(A.data, Atmp, sizeof(double)*A.cur_proc_row_count*A.cur_proc_col_count, cudaMemcpyHostToDevice);
-	delete [] Atmp;
+	// set up random number generator
+	curandGenerator_t gen;
+	curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_DEFAULT);
+	curandSetPseudoRandomGeneratorSeed(gen, 1234ULL);
 
-	int trials = 100;	
-	if (argc==4)
-		trials = atoi(argv[3]);
+	// fill vector by random numbers
+	curandGenerateUniformDouble(gen, x.data, x.cur_proc_row_count);
 
+	// fill matrix by random data
+	curandGenerateUniformDouble(gen, A.data, A.cur_proc_row_count*A.cur_proc_col_count);
+
+	// setup of time measurements
+	cudaEvent_t start, stop;
+	float gpu_time = 0.0f;
+	cudaEventCreate(&start);
+	cudaEventCreate(&stop);
+
+	// compute kernel
+	cudaEventRecord(start, 0);
 	for (int n = 1; n<trials; n++) 
 	{
 		// calculate MVP
 		mpla_dgemv(&Ax, &A, &x, &instance);
 	}
+	cudaEventRecord(stop, 0);
+	cudaEventSynchronize(stop);
 
-	// retrieve data from GPU
-	double* Ax_cur_proc_from_GPU = new double[Ax.cur_proc_row_count];
-	cudaMemcpy(Ax_cur_proc_from_GPU, Ax.data, sizeof(double)*Ax.cur_proc_row_count, cudaMemcpyDeviceToHost);
-	
-	for (int i=0; i<Ax.cur_proc_row_count; i++)
-	{
-		if ((fabs(Ax_h[Ax.cur_proc_row_offset+i] - Ax_cur_proc_from_GPU[i]))/fabs(Ax_h[Ax.cur_proc_row_offset+i])>1.0e-12)
-		{
-			printf("Results do not match!\n"); fflush(stdout);
-			exit(1);
-		}
-	}
-	printf("Results match\n");
-	
-	
-	delete [] Ax_cur_proc_from_GPU;
-	
+	// evaluate time
+	cudaEventElapsedTime(&gpu_time, start, stop);
+	printf("Time spent: %.10f\n", gpu_time/1000);
 
 	mpla_free_matrix(&A, &instance);
 	mpla_free_vector(&Ax, &instance);
 	mpla_free_vector(&x, &instance);
 
-	delete [] A_h;
-	delete [] x_h;
-	delete [] Ax_h;
+	// curand cleanup
+	curandDestroyGenerator(gen);
+
+	// event cleanup
+	cudaEventDestroy(start);
+	cudaEventDestroy(stop); 
 
 	MPI_Finalize();
 
