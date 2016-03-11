@@ -16,7 +16,7 @@
 // along with MPLA.  If not, see <http://www.gnu.org/licenses/>.
 
 
-
+#include "mpla.h"
 #include <stdio.h> 
 #include "cublas_v2.h"
 
@@ -25,7 +25,17 @@ void info()
 	printf("Hello world\n");
 }
 
-void mpla_init_instance(struct mpla_instance* instance, MPIComm comm)
+void checkCUDAError(const char* msg) {
+cudaError_t err = cudaGetLastError();
+  if (cudaSuccess != err) {
+    fprintf(stderr, "Cuda error: %s: %s.\n", msg, cudaGetErrorString(err));
+    exit(EXIT_FAILURE);
+  }
+}
+
+
+
+void mpla_init_instance(struct mpla_instance* instance, MPI_Comm comm)
 {
 	instance->comm = comm;	
 
@@ -34,7 +44,7 @@ void mpla_init_instance(struct mpla_instance* instance, MPIComm comm)
 
 	// find number of current process
 	MPI_Comm_rank(comm, &(instance->cur_proc_rank));
-	if (instance->current_proc==0)
+	if (instance->cur_proc_rank==0)
 		instance->is_parent = true;
 	else
 		instance->is_parent = false;
@@ -55,7 +65,7 @@ void mpla_init_instance(struct mpla_instance* instance, MPIComm comm)
 	instance->cur_proc_row = cur_proc_coord[0];
 	instance->cur_proc_col = cur_proc_coord[1];
 
-	cublasCreate(&(instance->handle));
+	cublasCreate(&(instance->cublas_handle));
 	
 }
 
@@ -78,14 +88,15 @@ void mpla_init_matrix(struct mpla_matrix* matrix, struct mpla_instance* instance
 		matrix->proc_col_offset[i] = new int[instance->proc_cols];
 	}
 
+/*
 	// computing general row block sizes
 	int filled_row_block_size = ceil((float)mat_row_count / (float)(instance->proc_rows));
-	int filled_row_block_count = mat_row_count / filled_row_block_size;
+//	int filled_row_block_count = mat_row_count / filled_row_block_size;
 	int last_row_block_size =  mat_row_count % filled_row_block_size;
 
 	// computing general column block sizes
-	int filled_col_block_size = ceil((float)mat_col_count / (float)(instance->proc_rows));
-	int filled_col_block_count = mat_col_count / filled_col_block_size;
+	int filled_col_block_size = ceil((float)mat_col_count / (float)(instance->proc_cols));
+//	int filled_col_block_count = mat_col_count / filled_col_block_size;
 	int last_col_block_size =  mat_col_count % filled_col_block_size;
 
 
@@ -105,17 +116,56 @@ void mpla_init_matrix(struct mpla_matrix* matrix, struct mpla_instance* instance
 				matrix->proc_col_count[i][j] = filled_col_block_size;
 		}
 	}
+*/
+	
+	// computing general row block sizes
+	int almost_filled_row_block_size = mat_row_count / instance->proc_rows;
+	int remaining_rows = mat_row_count % instance->proc_rows;
+	if (almost_filled_row_block_size == 0)
+	{
+		printf("MPLA: There are more process block rows than matrix rows. Exiting...\n");
+		exit(1);
+	}
+
+
+	// computing general column block sizes
+	int almost_filled_col_block_size = mat_col_count / instance->proc_cols;
+	int remaining_cols = mat_col_count % instance->proc_cols;
+
+	if (almost_filled_row_block_size == 0)
+	{
+		printf("MPLA: There are more process block columns than matrix columns. Exiting...\n");
+		exit(1);
+	}
+
+
+	// computing process-wise block row / column counts
+	for (int i=0; i< instance->proc_rows; i++)
+	{
+		for (int j=0; j<instance->proc_cols; j++)
+		{
+			matrix->proc_row_count[i][j] = almost_filled_row_block_size + ( (i<remaining_rows) ? 1 : 0 );
+			matrix->proc_col_count[i][j] = almost_filled_col_block_size + ( (j<remaining_cols) ? 1 : 0 );
+		}
+	}
+	
+
+
 
 	// computing process-wise block row / column offsets
 	matrix->proc_row_offset[0][0] = 0;
 	matrix->proc_col_offset[0][0] = 0;
+	for (int i=1; i<instance->proc_rows; i++)
+		matrix->proc_col_offset[i][0] = 0;
+	for (int j=1; j<instance->proc_cols; j++)
+		matrix->proc_row_offset[0][j] = 0;
 	for (int i=1; i < instance->proc_rows; i++)
-		for (int j=1; j < instance->proc_cols; j++)
+		for (int j=0; j < instance->proc_cols; j++)
 			matrix->proc_row_offset[i][j] = matrix->proc_row_offset[i-1][j] + matrix->proc_row_count[i-1][j];
-	for (int j=1; j < instance->pro_cols; j++)
-		for (int i=1; i < instance->proc_rows; i++)
+	for (int j=1; j < instance->proc_cols; j++)
+		for (int i=0; i < instance->proc_rows; i++)
 			matrix->proc_col_offset[i][j] = matrix->proc_col_offset[i][j-1] + matrix->proc_col_count[i][j-1];
-	
+		
 	// retrieving local data for the current process
 	matrix->cur_proc_row_count = matrix->proc_row_count[instance->cur_proc_row][instance->cur_proc_col];
 	matrix->cur_proc_col_count = matrix->proc_col_count[instance->cur_proc_row][instance->cur_proc_col];
@@ -124,6 +174,8 @@ void mpla_init_matrix(struct mpla_matrix* matrix, struct mpla_instance* instance
 
 	// allocating matrix data storage
 	cudaMalloc((void**)&(matrix->data), sizeof(double)*matrix->cur_proc_row_count*matrix->cur_proc_col_count);
+	cudaThreadSynchronize();
+	checkCUDAError("cudaMalloc");
 }
 
 void mpla_init_vector(struct mpla_vector* vector, struct mpla_instance* instance, int vec_row_count)
@@ -141,34 +193,41 @@ void mpla_init_vector(struct mpla_vector* vector, struct mpla_instance* instance
 	}
 
 	// computing general row block sizes
-	int filled_row_block_size = ceil((float)vec_row_count / (float)(instance->proc_rows));
-	int filled_row_block_count = vec_row_count / filled_row_block_size;
-	int last_row_block_size =  vec_row_count % filled_row_block_size;
+	int almost_filled_row_block_size = vec_row_count / instance->proc_rows;
+	int remaining_rows = vec_row_count % instance->proc_rows;
+
+	if (almost_filled_row_block_size == 0)
+	{
+		printf("MPLA: There are more process block rows than vector rows. Exiting...\n");
+		exit(1);
+	}
+
 
 	// computing process-wise block row / column counts
-	for (int i=0; i < instance->proc_rows; i++)
+	for (int i=0; i< instance->proc_rows; i++)
 	{
-		for (int j=0; j < instance->proc_cols; j++)
+		for (int j=0; j<instance->proc_cols; j++)
 		{
-			if ((i==(instance->proc_rows-1)) && (last_row_block_size>0)) // handling last row block which is only partially filled
-				vector->proc_row_count[i][j] = last_row_block_size;
-			else
-				vector->proc_row_count[i][j] = filled_row_block_size;
+			vector->proc_row_count[i][j] = almost_filled_row_block_size + ( (i<remaining_rows) ? 1 : 0 );
 		}
 	}
 
 	// computing process-wise block row / column offsets
 	vector->proc_row_offset[0][0] = 0;
+	for (int j=1; j < instance->proc_cols; j++)
+		vector->proc_row_offset[0][j] = 0;	
 	for (int i=1; i < instance->proc_rows; i++)
-		for (int j=1; j < instance->proc_cols; j++)
+		for (int j=0; j < instance->proc_cols; j++)
 			vector->proc_row_offset[i][j] = vector->proc_row_offset[i-1][j] + vector->proc_row_count[i-1][j];
-	
+		
 	// retrieving local data for the current process
 	vector->cur_proc_row_count = vector->proc_row_count[instance->cur_proc_row][instance->cur_proc_col];
 	vector->cur_proc_row_offset = vector->proc_row_offset[instance->cur_proc_row][instance->cur_proc_col];
 
 	// allocating matrix data storage
-	cudaMalloc((void**)&(vector->data), sizeof(double)*vector->cur_proc_row_count*vector->cur_proc_col_count);
+	cudaMalloc((void**)&(vector->data), sizeof(double)*vector->cur_proc_row_count);
+	cudaThreadSynchronize();
+	checkCUDAError("cudaMalloc");
 }
 
 void mpla_init_vector_for_block_rows(struct mpla_vector* vector, struct mpla_instance* instance, int vec_row_count)
@@ -186,8 +245,31 @@ void mpla_init_vector_for_block_rows(struct mpla_vector* vector, struct mpla_ins
 	}
 
 	// computing general row block sizes
+	int almost_filled_row_block_size = vec_row_count / instance->proc_cols;
+	int remaining_rows = vec_row_count % instance->proc_cols;
+
+	if (almost_filled_row_block_size == 0)
+	{
+		printf("MPLA: There are more process block columns than matrix columns. Exiting...\n");
+		exit(1);
+	}
+
+
+	// computing process-wise block row / column counts
+	for (int i=0; i< instance->proc_rows; i++)
+	{
+		for (int j=0; j<instance->proc_cols; j++)
+		{
+			vector->proc_row_count[i][j] = almost_filled_row_block_size + ( (j<remaining_rows) ? 1 : 0 );
+		}
+	}
+	
+
+/*
+
+	// computing general row block sizes
 	int filled_row_block_size = ceil((float)vec_row_count / (float)(instance->proc_cols));
-	int filled_row_block_count = vec_row_count / filled_row_block_size;
+//	int filled_row_block_count = vec_row_count / filled_row_block_size;
 	int last_row_block_size =  vec_row_count % filled_row_block_size;
 
 	// computing process-wise block row / column counts
@@ -201,11 +283,13 @@ void mpla_init_vector_for_block_rows(struct mpla_vector* vector, struct mpla_ins
 				vector->proc_row_count[i][j] = filled_row_block_size;
 		}
 	}
-
+*/
 	// computing process-wise block row / column offsets
 	vector->proc_row_offset[0][0] = 0;
 	for (int i=1; i < instance->proc_rows; i++)
-		for (int j=1; j < instance->proc_cols; j++)
+		vector->proc_row_offset[i][0] = 0;
+	for (int j=1; j < instance->proc_cols; j++)
+		for (int i=0; i < instance->proc_rows; i++)
 			vector->proc_row_offset[i][j] = vector->proc_row_offset[i][j-1] + vector->proc_row_count[i][j-1];
 	
 	// retrieving local data for the current process
@@ -213,7 +297,9 @@ void mpla_init_vector_for_block_rows(struct mpla_vector* vector, struct mpla_ins
 	vector->cur_proc_row_offset = vector->proc_row_offset[instance->cur_proc_row][instance->cur_proc_col];
 
 	// allocating matrix data storage
-	cudaMalloc((void**)&(vector->data), sizeof(double)*vector->cur_proc_row_count*vector->cur_proc_col_count);
+	cudaMalloc((void**)&(vector->data), sizeof(double)*vector->cur_proc_row_count);
+	cudaThreadSynchronize();
+	checkCUDAError("cudaMalloc");
 }
 
 
@@ -254,6 +340,7 @@ void mpla_redistribute_vector_for_dgesv(struct mpla_vector* b_redist, struct mpl
 
 	// WARNING: The following code is not efficient for a strong parallelization !!!!!
 
+
 	// create sub-communicator for each process column
 	int remain_dims[2];
 	remain_dims[0]=1;
@@ -269,14 +356,16 @@ void mpla_redistribute_vector_for_dgesv(struct mpla_vector* b_redist, struct mpl
 	int* displs = new int[instance->proc_rows];
 	for (int i=0; i<instance->proc_rows; i++)
 	{
-		recvcounts[i] = b->proc_row_count[i][b->cur_proc_col];
-		displs[i] = b->proc_row_offset[i][b->cur_proc_col];
+		recvcounts[i] = b->proc_row_count[i][instance->cur_proc_col];
+		displs[i] = b->proc_row_offset[i][instance->cur_proc_col];
 	}
-	cudaMalloc((void*)&full_vector, sizeof(double)*b->vec_row_count);
+	cudaMalloc((void**)&full_vector, sizeof(double)*b->vec_row_count);
+	cudaThreadSynchronize();
+	checkCUDAError("cudaMalloc");
 	MPI_Allgatherv(b->data, b->cur_proc_row_count, MPI_DOUBLE, full_vector, recvcounts, displs, MPI_DOUBLE, column_comm);
 
 	// extract column-wise local part of full vector
-	cudaMemcpy(b_redist->data, &(full_vector[b_redist->cur_proc_row_offset]), sizeof(double)*b_dist->cur_proc_row_count, cudaMemcpyDeviceToDevice);
+	cudaMemcpy(b_redist->data, &(full_vector[b_redist->cur_proc_row_offset]), sizeof(double)*b_redist->cur_proc_row_count, cudaMemcpyDeviceToDevice);
 
 	// memory cleanup
 	cudaFree(full_vector);
@@ -288,9 +377,11 @@ void mpla_free_vector(struct mpla_vector* x, struct mpla_instance* instance)
 	cudaFree(x->data);
 	for (int i=0; i<instance->proc_rows; i++)
 	{
-		delete [] x->proc_row_count;
-		delete [] x->proc_row_offset;
+		delete [] x->proc_row_count[i];
+		delete [] x->proc_row_offset[i];
 	}
+	delete [] x->proc_row_count;
+	delete [] x->proc_row_offset;
 }
 
 void mpla_free_matrix(struct mpla_matrix* A, struct mpla_instance* instance)
@@ -298,11 +389,15 @@ void mpla_free_matrix(struct mpla_matrix* A, struct mpla_instance* instance)
 	cudaFree(A->data);
 	for (int i=0; i<instance->proc_rows; i++)
 	{
-		delete [] A->proc_row_count;
-		delete [] A->proc_row_offset;
-		delete [] A->proc_col_count;
-		delete [] A->proc_col_offset;
+		delete [] A->proc_row_count[i];
+		delete [] A->proc_row_offset[i];
+		delete [] A->proc_col_count[i];
+		delete [] A->proc_col_offset[i];
 	}
+	delete [] A->proc_row_count;
+	delete [] A->proc_row_offset;
+	delete [] A->proc_col_count;
+	delete [] A->proc_col_offset;
 }
 
 void mpla_dgemv(struct mpla_vector* b, struct mpla_matrix* A, struct mpla_vector* x, struct mpla_instance* instance)
@@ -318,10 +413,8 @@ void mpla_dgemv(struct mpla_vector* b, struct mpla_matrix* A, struct mpla_vector
 	mpla_redistribute_vector_for_dgesv(&x_redist, x, A, instance);
 		
 	// computation core: matrix-vector product
-	cublasDgemv(*(instance->cublas_handle), CUBLAS_OP_N, A->cur_proc_row_count, A->cur_proc_col_count, 
-		    &one, A->data, A->cur_proc_row_count, x_redist->data, 1, &zero, b->data, 1);
+	cublasDgemv((instance->cublas_handle), CUBLAS_OP_N, A->cur_proc_row_count, A->cur_proc_col_count, &one, A->data, A->cur_proc_row_count, x_redist.data, 1, &zero, b->data, 1);
 
-	
 	// create sub-communicator for each process row
 	int remain_dims[2];
 	remain_dims[0]=0;
@@ -331,13 +424,15 @@ void mpla_dgemv(struct mpla_vector* b, struct mpla_matrix* A, struct mpla_vector
 
 	// summation of block row results
 	double* sum;
-	cudaMalloc((void*)&sum, sizeof(double)*x_redist->cur_proc_row_count);
-	MPI_REDUCE(b->data, sum, x_redist->cur_proc_row_count, MPI_DOUBLE, MPI_SUM, row_comm);
-	cudaMemcpy(b->data, sum, sizeof(double)*x_redist->cur_proc_row_count, cudaMemcpyDeviceToDevice);
+	cudaMalloc((void**)&sum, sizeof(double)*b->cur_proc_row_count);
+	cudaThreadSynchronize();
+	checkCUDAError("cudaMalloc");
+	MPI_Allreduce(b->data, sum, b->cur_proc_row_count, MPI_DOUBLE, MPI_SUM, row_comm);
+	cudaMemcpy(b->data, sum, sizeof(double)*b->cur_proc_row_count, cudaMemcpyDeviceToDevice);
 
 	// cleanup
 	cudaFree(sum);
-	mpla_free_vector(x_redist);
+	mpla_free_vector(&x_redist, instance);
 }
 
 

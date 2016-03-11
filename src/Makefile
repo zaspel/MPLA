@@ -16,8 +16,8 @@
 # along with MPLA.  If not, see <http://www.gnu.org/licenses/>.
 
 
-default:
-	nvcc -L. -lmpla -o test_library test_library.cu
+default: shared
+	nvcc -g -I/home/zaspel/libs/openmpi/include -L/home/zaspel/libs/openmpi/lib -lmpi_cxx -lmpi -L. -lmpla -lcublas -o test_library test_library.cu
 
 shared:
-	 nvcc --ptxas-options=-v --compiler-options '-fPIC' -o libmpla.so --shared mpla.cu
+	nvcc -g -I/home/zaspel/libs/openmpi/include -I/usr/local/cuda/include -L/home/zaspel/libs/openmpi/lib -lmpi_cxx -lmpi --ptxas-options=-v --compiler-options '-fPIC' -o libmpla.so --shared mpla.cu

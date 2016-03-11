@@ -15,6 +15,8 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with MPLA.  If not, see <http://www.gnu.org/licenses/>.
 
+#include "cublas_v2.h"
+#include <mpi.h>
 
 #ifndef mpla_h__
 #define mpla_h__
@@ -28,7 +30,8 @@ struct mpla_instance
 	int proc_cols;
 	int cur_proc_coord[2];
 	int cur_proc_row;
-	int cur_proc_col;	
+	int cur_proc_col;
+	int cur_proc_rank;	
 	bool is_parent;
 	cublasHandle_t cublas_handle;
 };
@@ -61,6 +64,22 @@ struct mpla_vector
 
 
 extern void info();
+
+extern void mpla_init_instance(struct mpla_instance* instance, MPI_Comm comm);
+
+extern void mpla_init_matrix(struct mpla_matrix* matrix, struct mpla_instance* instance, int mat_row_count, int mat_col_count);
+
+extern void mpla_init_vector(struct mpla_vector* vector, struct mpla_instance* instance, int vec_row_count);
+
+extern void mpla_init_vector_for_block_rows(struct mpla_vector* vector, struct mpla_instance* instance, int vec_row_count);
+
+extern void mpla_redistribute_vector_for_dgesv(struct mpla_vector* b_redist, struct mpla_vector* b, struct mpla_matrix* A, struct mpla_instance* instance);
+
+extern void mpla_free_vector(struct mpla_vector* x, struct mpla_instance* instance);
+
+extern void mpla_free_matrix(struct mpla_matrix* A, struct mpla_instance* instance);
+
+extern void mpla_dgemv(struct mpla_vector* b, struct mpla_matrix* A, struct mpla_vector* x, struct mpla_instance* instance);
 
 
 #endif
