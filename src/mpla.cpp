@@ -527,5 +527,75 @@ void mpla_generic_dgemv(struct mpla_vector* b, struct mpla_generic_matrix* A, st
 	mpla_free_vector(&x_redist, instance);
 }
 
+void mpla_daxpy(struct mpla_vector* y, double alpha, struct mpla_vector* x, struct mpla_instance* instance)
+{
+	// compute process-wise axpy
+	cublasDaxpy(instance->cublas_handle, x->cur_proc_row_count, &alpha, x->data, 1, y->data, 1);
+}
 
+void mpla_vector_set_zero(struct mpla_vector* x, struct mpla_instance* instance)
+{
+	cudaMemset(x->data, 0, sizeof(double)*x->cur_proc_row_count);
+}
 
+void mpla_generic_conjugate_gradient(struct mpla_vector* b, struct mpla_generic_matrix* A, struct mpla_vector* x, int iter_max, double epsilon, void (*mpla_dgemv_core)(struct mpla_vector*, struct mpla_generic_matrix*, struct mpla_vector*, struct mpla_instance*), struct mpla_instance* instance)
+{
+	// init some vectors
+	struct mpla_vector r;
+	struct mpla_vector d;
+	struct mpla_vector z;
+	mpla_init_vector(&r, instance, x->vec_row_count);
+	mpla_init_vector(&d, instance, x->vec_row_count);
+	mpla_init_vector(&z, instance, x->vec_row_count);
+
+	double alpha,beta;
+
+	// r_0 = b - A * x_0
+	mpla_generic_dgemv(&z, A, x, mpla_dgemv_core, instance);
+	mpla_vector_set_zero(&r, instance);
+	mpla_daxpy(&r, 1, b, instance);
+	mpla_daxpy(&r, -1, &z, instance);
+
+	// d_0 = r_0
+	mpla_vector_set_zero(&d, instance);
+	mpla_daxpy(&d, 1, &r, instance);
+
+	for (int k=0; k<iter_max; k++)
+	{
+		// z = A * d_k
+		mpla_generic_dgemv(&z, A, &d, mpla_dgemv_core, instance);
+		
+		// alpha_k = <r_k,r_k>/<d_k, z>
+		double t1,t2;
+		mpla_ddot(&t1, &r, &r, instance);
+		mpla_ddot(&t2, &d, &z, instance);
+		alpha = t1 / t2;
+
+		// x_{k+1} = x_k + alpha_k d_k
+		mpla_daxpy(x, alpha, &d, instance);
+		
+		// r_{k+1} = r_k - alpha_k z
+		mpla_daxpy(&r, -alpha, &z, instance);
+
+		// beta_k = <r_{k+1}, r_{k+1}> / <r_k, r_k>
+		mpla_ddot(&t2, &r, &r, instance);
+		beta = t2 / t1;
+
+		if (sqrt(t2/(double)(x->vec_row_count))<epsilon)
+		{
+			break;
+		}
+		
+		// d_{k+1} = r_{k+1} + beta_k d_k
+		mpla_vector_set_zero(&z, instance);
+		mpla_daxpy(&z, beta, &d, instance);
+		mpla_daxpy(&z, 1, &r, instance);
+		mpla_vector_set_zero(&d, instance);
+		mpla_daxpy(&d, 1, &z, instance); 
+	}
+
+	// memory cleanup
+	mpla_free_vector(&r, instance);
+	mpla_free_vector(&d, instance);
+	mpla_free_vector(&z, instance);
+}

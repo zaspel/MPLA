@@ -99,5 +99,11 @@ extern void mpla_ddot(double* xy, struct mpla_vector* x, struct mpla_vector* y, 
 
 extern void mpla_generic_dgemv(struct mpla_vector* b, struct mpla_generic_matrix* A, struct mpla_vector* x, void (*mpla_dgemv_core)(struct mpla_vector*, struct mpla_generic_matrix*, struct mpla_vector*, struct mpla_instance*), struct mpla_instance* instance);
 
+extern void mpla_daxpy(struct mpla_vector* y, double alpha, struct mpla_vector* x, struct mpla_instance* instance);
+
+extern void mpla_vector_set_zero(struct mpla_vector* x, struct mpla_instance* instance);
+
+extern void mpla_generic_conjugate_gradient(struct mpla_vector* b, struct mpla_generic_matrix* A, struct mpla_vector* x, int iter_max, double epsilon, void (*mpla_dgemv_core)(struct mpla_vector*, struct mpla_generic_matrix*, struct mpla_vector*, struct mpla_instance*), struct mpla_instance* instance);
+
 #endif
 
