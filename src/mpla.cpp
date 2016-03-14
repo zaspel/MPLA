@@ -374,6 +374,46 @@ void mpla_redistribute_vector_for_dgesv(struct mpla_vector* b_redist, struct mpl
 	cudaFree(full_vector);
 }
 
+void mpla_redistribute_vector_for_generic_dgesv(struct mpla_vector* b_redist, struct mpla_vector* b, struct mpla_generic_matrix* A, struct mpla_instance* instance)
+{
+	// attention: this code does no correctness check for the input data
+
+
+	// WARNING: The following code is not efficient for a strong parallelization !!!!!
+
+
+	// create sub-communicator for each process column
+	int remain_dims[2];
+	remain_dims[0]=1;
+	remain_dims[1]=0;
+	MPI_Comm column_comm;
+	MPI_Cart_sub(instance->comm, remain_dims, &column_comm);
+	int column_rank;
+	MPI_Comm_rank(column_comm, &column_rank);
+	
+	// columnwise creation of the full vector
+	double* full_vector;
+	int* recvcounts = new int[instance->proc_rows];
+	int* displs = new int[instance->proc_rows];
+	for (int i=0; i<instance->proc_rows; i++)
+	{
+		recvcounts[i] = b->proc_row_count[i][instance->cur_proc_col];
+		displs[i] = b->proc_row_offset[i][instance->cur_proc_col];
+	}
+	cudaMalloc((void**)&full_vector, sizeof(double)*b->vec_row_count);
+	cudaThreadSynchronize();
+	checkCUDAError("cudaMalloc");
+	MPI_Allgatherv(b->data, b->cur_proc_row_count, MPI_DOUBLE, full_vector, recvcounts, displs, MPI_DOUBLE, column_comm);
+
+	// extract column-wise local part of full vector
+	cudaMemcpy(b_redist->data, &(full_vector[b_redist->cur_proc_row_offset]), sizeof(double)*b_redist->cur_proc_row_count, cudaMemcpyDeviceToDevice);
+
+	// memory cleanup
+	cudaFree(full_vector);
+}
+
+
+
 
 void mpla_free_vector(struct mpla_vector* x, struct mpla_instance* instance)
 {
@@ -453,6 +493,38 @@ void mpla_ddot(double* xy, struct mpla_vector* x, struct mpla_vector* y, struct 
 
 	// parallel summation and communication
 	MPI_Allreduce(&xy_tmp, xy, 1, MPI_DOUBLE, MPI_SUM, column_comm);
+}
+
+void mpla_generic_dgemv(struct mpla_vector* b, struct mpla_generic_matrix* A, struct mpla_vector* x, void (*mpla_dgemv_core)(struct mpla_vector*, struct mpla_generic_matrix*, struct mpla_vector*, struct mpla_instance*), struct mpla_instance* instance)
+{
+	// allocate redistributed vector
+	struct mpla_vector x_redist;
+	mpla_init_vector_for_block_rows(&x_redist, instance, x->vec_row_count);
+	
+	// redistribute input vector with row-block parallel distribution to column-block parallel distribution
+	mpla_redistribute_vector_for_generic_dgesv(&x_redist, x, A, instance);
+		
+	// generic computation core: matrix-vector product
+	mpla_dgemv_core(b, A, &x_redist, instance);
+
+	// create sub-communicator for each process row
+	int remain_dims[2];
+	remain_dims[0]=0;
+	remain_dims[1]=1;
+	MPI_Comm row_comm;
+	MPI_Cart_sub(instance->comm, remain_dims, &row_comm);
+
+	// summation of block row results
+	double* sum;
+	cudaMalloc((void**)&sum, sizeof(double)*b->cur_proc_row_count);
+	cudaThreadSynchronize();
+	checkCUDAError("cudaMalloc");
+	MPI_Allreduce(b->data, sum, b->cur_proc_row_count, MPI_DOUBLE, MPI_SUM, row_comm);
+	cudaMemcpy(b->data, sum, sizeof(double)*b->cur_proc_row_count, cudaMemcpyDeviceToDevice);
+
+	// cleanup
+	cudaFree(sum);
+	mpla_free_vector(&x_redist, instance);
 }
 
 

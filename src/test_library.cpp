@@ -34,6 +34,13 @@ cudaError_t err = cudaGetLastError();
   }
 }
 
+void mpla_generic_dgemv_core_cublas(struct mpla_vector* b, struct mpla_generic_matrix* A, struct mpla_vector* x_redist, struct mpla_instance* instance)
+{
+	double one = 1;
+	double zero = 0;
+	cublasDgemv((instance->cublas_handle), CUBLAS_OP_N, A->cur_proc_row_count, A->cur_proc_col_count, &one, (double*)(A->data), A->cur_proc_row_count, x_redist->data, 1, &zero, b->data, 1);
+}
+
 int main(int argc, char* argv[])
 {
 	int m,n;
@@ -113,7 +120,10 @@ int main(int argc, char* argv[])
 	for (int n = 1; n<trials; n++) 
 	{
 		// calculate MVP
-		mpla_dgemv(&Ax, &A, &x, &instance);
+//		mpla_dgemv(&Ax, &A, &x, &instance);
+		void (*mpla_dgemv_core)(struct mpla_vector*, struct mpla_generic_matrix*, struct mpla_vector*, struct mpla_instance*);
+		mpla_dgemv_core = &mpla_generic_dgemv_core_cublas;
+		mpla_generic_dgemv(&Ax, (struct mpla_generic_matrix*)&A, &x, mpla_dgemv_core, &instance);
 		// calculate dot product
 		mpla_ddot(&xy, &x, &y, &instance);
 	}

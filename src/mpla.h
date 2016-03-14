@@ -36,10 +36,24 @@ struct mpla_instance
 	cublasHandle_t cublas_handle;
 };
 
-
 struct mpla_matrix
 {
 	double* data;
+	int mat_row_count, mat_col_count;
+	int cur_proc_row_count;
+	int cur_proc_col_count;
+	int cur_proc_row_offset;
+	int cur_proc_col_offset;
+	int** proc_row_count;
+	int** proc_col_count;
+	int** proc_row_offset;
+	int** proc_col_offset;
+	
+};
+
+struct mpla_generic_matrix
+{
+	void* data;
 	int mat_row_count, mat_col_count;
 	int cur_proc_row_count;
 	int cur_proc_col_count;
@@ -82,6 +96,8 @@ extern void mpla_free_matrix(struct mpla_matrix* A, struct mpla_instance* instan
 extern void mpla_dgemv(struct mpla_vector* b, struct mpla_matrix* A, struct mpla_vector* x, struct mpla_instance* instance);
 
 extern void mpla_ddot(double* xy, struct mpla_vector* x, struct mpla_vector* y, struct mpla_instance* instance);
+
+extern void mpla_generic_dgemv(struct mpla_vector* b, struct mpla_generic_matrix* A, struct mpla_vector* x, void (*mpla_dgemv_core)(struct mpla_vector*, struct mpla_generic_matrix*, struct mpla_vector*, struct mpla_instance*), struct mpla_instance* instance);
 
 #endif
 
