@@ -17,7 +17,15 @@
 
 
 default: shared
-	nvcc -g -I/home/zaspel/libs/openmpi/include -L/home/zaspel/libs/openmpi/lib -lcurand -lmpi_cxx -lmpi -L. -lmpla -lcublas -o benchmark_dgemv benchmark_dgemv.cu
+	g++ -c -I/usr/local/cuda/include -I/home/zaspel/libs/openmpi/include -o benchmark_dgemv.o benchmark_dgemv.cpp
+	g++ -L/usr/local/cuda/lib64 -L/home/zaspel/libs/openmpi/lib -L. -o benchmark_dgemv benchmark_dgemv.o -lcudart -lcurand -lmpi_cxx -lmpi -lmpla -lcublas
 
 shared:
-	nvcc -g -I/home/zaspel/libs/openmpi/include -I/usr/local/cuda/include -L/home/zaspel/libs/openmpi/lib -lmpi_cxx -lmpi --ptxas-options=-v --compiler-options '-fPIC' -o libmpla.so --shared mpla.cu
+	gcc -I/usr/local/cuda/include -I/home/zaspel/libs/openmpi/include -pthread  -L/usr/local/cuda/lib64 -lcudart -fPIC -o libmpla.so --shared mpla.cpp
+
+titan:
+	CC -lcudart -fPIC -o libmpla.so --shared mpla.cpp
+	CC -lcurand -L. -lmpla -lcublas -o benchmark_dgemv benchmark_dgemv.cpp
+
+clean:
+	rm *.o *.so

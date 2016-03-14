@@ -17,6 +17,7 @@
 
 #include "mpla.h"
 #include "mpi.h"
+#include <stdlib.h>
 
 int idx(int i, int j, int m, int n)
 {

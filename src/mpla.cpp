@@ -19,6 +19,9 @@
 #include "mpla.h"
 #include <stdio.h> 
 #include "cublas_v2.h"
+#include <stdlib.h>
+#include <cuda_runtime.h>
+#include <mpi.h>
 
 void info()
 {
