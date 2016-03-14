@@ -17,6 +17,7 @@
 
 #include "mpla.h"
 #include "mpi.h"
+#include <cuda_runtime.h>
 #include <stdlib.h>
 
 int idx(int i, int j, int m, int n)
@@ -47,6 +48,10 @@ int main(int argc, char* argv[])
 	for (int i=0; i<n; i++)
 		x_h[i] = i;
 
+	double* y_h = new double[n];
+	for (int i=0; i<n; i++)
+		y_h[i] = i+1;
+
 	double* Ax_h = new double[m];
 	for (int i=0; i<m; i++)
 	{
@@ -57,6 +62,9 @@ int main(int argc, char* argv[])
 		}		
 	}
 
+	double xy_h;
+	for (int i=0; i<n; i++)
+		xy_h += x_h[i]*y_h[i];
 	
 	MPI_Init( &argc, &argv );
 
@@ -71,11 +79,16 @@ int main(int argc, char* argv[])
 	struct mpla_vector x;
 	mpla_init_vector(&x, &instance, n);
 
+	struct mpla_vector y;
+	mpla_init_vector(&y, &instance, n);
+
 	struct mpla_vector Ax;
 	mpla_init_vector(&Ax, &instance, m);
 
-	// fill vector
+	// fill vectors
 	cudaMemcpy(x.data, &(x_h[x.cur_proc_row_offset]), sizeof(double)*x.cur_proc_row_count, cudaMemcpyHostToDevice);
+	checkCUDAError("memcpy");
+	cudaMemcpy(y.data, &(y_h[y.cur_proc_row_offset]), sizeof(double)*y.cur_proc_row_count, cudaMemcpyHostToDevice);
 	checkCUDAError("memcpy");
 	
 	
@@ -95,10 +108,14 @@ int main(int argc, char* argv[])
 	if (argc==4)
 		trials = atoi(argv[3]);
 
+	double xy;
+
 	for (int n = 1; n<trials; n++) 
 	{
 		// calculate MVP
 		mpla_dgemv(&Ax, &A, &x, &instance);
+		// calculate dot product
+		mpla_ddot(&xy, &x, &y, &instance);
 	}
 
 	// retrieve data from GPU
@@ -109,22 +126,31 @@ int main(int argc, char* argv[])
 	{
 		if ((fabs(Ax_h[Ax.cur_proc_row_offset+i] - Ax_cur_proc_from_GPU[i]))/fabs(Ax_h[Ax.cur_proc_row_offset+i])>1.0e-12)
 		{
-			printf("Results do not match!\n"); fflush(stdout);
+			printf("DGEMV Results do not match!\n"); fflush(stdout);
 			exit(1);
 		}
 	}
-	printf("Results match\n");
+	printf("DGEMV Results match\n");
 	
-	
+	if (fabs(xy_h-xy)/fabs(xy_h)>1.0e-12)
+	{
+		printf("DDOT Results do not match!\n"); fflush(stdout);
+		exit(1);
+	}
+	else
+		printf("DDOT Results match!\n");	
+
 	delete [] Ax_cur_proc_from_GPU;
 	
 
 	mpla_free_matrix(&A, &instance);
 	mpla_free_vector(&Ax, &instance);
 	mpla_free_vector(&x, &instance);
+	mpla_free_vector(&y, &instance);
 
 	delete [] A_h;
 	delete [] x_h;
+	delete [] y_h;
 	delete [] Ax_h;
 
 	MPI_Finalize();

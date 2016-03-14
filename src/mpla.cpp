@@ -438,6 +438,22 @@ void mpla_dgemv(struct mpla_vector* b, struct mpla_matrix* A, struct mpla_vector
 	mpla_free_vector(&x_redist, instance);
 }
 
+void mpla_ddot(double* xy, struct mpla_vector* x, struct mpla_vector* y, struct mpla_instance* instance)
+{
+	// compute process-wise dot product
+	double xy_tmp;
+	cublasDdot(instance->cublas_handle, x->cur_proc_row_count, x->data, 1, y->data, 1, &xy_tmp);
+
+	// create sub-communicator for each process column
+	int remain_dims[2];
+	remain_dims[0]=1;
+	remain_dims[1]=0;
+	MPI_Comm column_comm;
+	MPI_Cart_sub(instance->comm, remain_dims, &column_comm);
+
+	// parallel summation and communication
+	MPI_Allreduce(&xy_tmp, xy, 1, MPI_DOUBLE, MPI_SUM, column_comm);
+}
 
 
 

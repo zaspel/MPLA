@@ -15,17 +15,23 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with MPLA.  If not, see <http://www.gnu.org/licenses/>.
 
-
 default: shared
 	g++ -c -I/usr/local/cuda/include -I/home/zaspel/libs/openmpi/include -o benchmark_dgemv.o benchmark_dgemv.cpp
 	g++ -L/usr/local/cuda/lib64 -L/home/zaspel/libs/openmpi/lib -L. -o benchmark_dgemv benchmark_dgemv.o -lcudart -lcurand -lmpi_cxx -lmpi -lmpla -lcublas
 
+
 shared:
-	gcc -I/usr/local/cuda/include -I/home/zaspel/libs/openmpi/include -pthread  -L/usr/local/cuda/lib64 -lcudart -fPIC -o libmpla.so --shared mpla.cpp
+	g++ -I/usr/local/cuda/include -I/home/zaspel/libs/openmpi/include -pthread  -L/usr/local/cuda/lib64 -lcudart -fPIC -o libmpla.so --shared mpla.cpp
 
 titan:
 	CC -lcudart -fPIC -o libmpla.so --shared mpla.cpp
 	CC -lcurand -L. -lmpla -lcublas -o benchmark_dgemv benchmark_dgemv.cpp
 
 clean:
-	rm *.o *.so
+	rm *.o *.so test_library benchmark_dgemv
+
+test: shared
+	g++ -c -I/usr/local/cuda/include -I/home/zaspel/libs/openmpi/include -o test_library.o test_library.cpp
+	g++ -L/usr/local/cuda/lib64 -L/home/zaspel/libs/openmpi/lib -L. -o test_library test_library.o -lcudart -lcurand -lmpi_cxx -lmpi -lmpla -lcublas
+
+
