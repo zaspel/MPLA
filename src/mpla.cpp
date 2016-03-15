@@ -560,7 +560,12 @@ void mpla_generic_conjugate_gradient(struct mpla_vector* b, struct mpla_generic_
 	mpla_vector_set_zero(&d, instance);
 	mpla_daxpy(&d, 1, &r, instance);
 
-	for (int k=0; k<iter_max; k++)
+	double res;
+	mpla_ddot(&res, &r, &r, instance);
+//	printf("%d: %e\n", 0, sqrt(res/(double)(x->vec_row_count)));
+
+	if (sqrt(res/(double)(x->vec_row_count))>=epsilon)
+	for (int k=1; k<iter_max; k++)
 	{
 		// z = A * d_k
 		mpla_generic_dgemv(&z, A, &d, mpla_dgemv_core, instance);
@@ -580,6 +585,8 @@ void mpla_generic_conjugate_gradient(struct mpla_vector* b, struct mpla_generic_
 		// beta_k = <r_{k+1}, r_{k+1}> / <r_k, r_k>
 		mpla_ddot(&t2, &r, &r, instance);
 		beta = t2 / t1;
+
+//		printf("%d: %e\n", k, sqrt(t2/(double)(x->vec_row_count)));
 
 		if (sqrt(t2/(double)(x->vec_row_count))<epsilon)
 		{

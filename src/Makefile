@@ -18,6 +18,9 @@
 default: shared
 	g++ -c -I/usr/local/cuda/include -I/home/zaspel/libs/openmpi/include -o benchmark_dgemv.o benchmark_dgemv.cpp
 	g++ -L/usr/local/cuda/lib64 -L/home/zaspel/libs/openmpi/lib -L. -o benchmark_dgemv benchmark_dgemv.o -lcudart -lcurand -lmpi_cxx -lmpi -lmpla -lcublas
+	g++ -c -I/usr/local/cuda/include -I/home/zaspel/libs/openmpi/include -o benchmark_cg.o benchmark_cg.cpp
+	g++ -L/usr/local/cuda/lib64 -L/home/zaspel/libs/openmpi/lib -L. -o benchmark_cg benchmark_cg.o -lcudart -lcurand -lmpi_cxx -lmpi -lmpla -lcublas
+
 
 
 shared:
@@ -26,6 +29,7 @@ shared:
 titan:
 	CC -lcudart -fPIC -o libmpla.so --shared mpla.cpp
 	CC -lcurand -L. -lmpla -lcublas -o benchmark_dgemv benchmark_dgemv.cpp
+	CC -lcurand -L. -lmpla -lcublas -o benchmark_cg benchmark_cg.cpp
 
 clean:
 	rm *.o *.so test_library benchmark_dgemv
@@ -33,5 +37,5 @@ clean:
 test: shared
 	g++ -c -I/usr/local/cuda/include -I/home/zaspel/libs/openmpi/include -o test_library.o test_library.cpp
 	g++ -L/usr/local/cuda/lib64 -L/home/zaspel/libs/openmpi/lib -L. -o test_library test_library.o -lcudart -lcurand -lmpi_cxx -lmpi -lmpla -lcublas
-
-
+	g++ -c -I/usr/local/cuda/include -I/home/zaspel/libs/openmpi/include -o test_cg.o test_cg.cpp
+	g++ -L/usr/local/cuda/lib64 -L/home/zaspel/libs/openmpi/lib -L. -o test_cg test_cg.o -lcudart -lcurand -lmpi_cxx -lmpi -lmpla -lcublas
