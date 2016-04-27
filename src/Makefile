@@ -15,7 +15,9 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with MPLA.  If not, see <http://www.gnu.org/licenses/>.
 
-default: shared
+default: test
+
+benchmark: shared
 	g++ -c -I/usr/local/cuda/include -I/home/zaspel/libs/openmpi/include -o benchmark_dgemv.o benchmark_dgemv.cpp
 	g++ -L/usr/local/cuda/lib64 -L/home/zaspel/libs/openmpi/lib -L. -o benchmark_dgemv benchmark_dgemv.o -lcudart -lcurand -lmpi_cxx -lmpi -lmpla -lcublas
 	g++ -c -I/usr/local/cuda/include -I/home/zaspel/libs/openmpi/include -o benchmark_cg.o benchmark_cg.cpp
@@ -39,3 +41,8 @@ test: shared
 	g++ -L/usr/local/cuda/lib64 -L/home/zaspel/libs/openmpi/lib -L. -o test_library test_library.o -lcudart -lcurand -lmpi_cxx -lmpi -lmpla -lcublas
 	g++ -c -I/usr/local/cuda/include -I/home/zaspel/libs/openmpi/include -o test_cg.o test_cg.cpp
 	g++ -L/usr/local/cuda/lib64 -L/home/zaspel/libs/openmpi/lib -L. -o test_cg test_cg.o -lcudart -lcurand -lmpi_cxx -lmpi -lmpla -lcublas
+	g++ -c -I/usr/local/cuda/include -I/home/zaspel/libs/openmpi/include -o test_generic_cg.o test_generic_cg.cpp
+	g++ -L/usr/local/cuda/lib64 -L/home/zaspel/libs/openmpi/lib -L. -o test_generic_cg test_generic_cg.o -lcudart -lcurand -lmpi_cxx -lmpi -lmpla -lcublas
+	nvcc -c -arch=sm_30 -I/home/zaspel/libs/openmpi/include kernel.cu -o kernel.o
+	g++ -c -I/usr/local/cuda/include -I/home/zaspel/libs/openmpi/include -o test_kernel_cg.o test_kernel_cg.cpp
+	g++ -L/usr/local/cuda/lib64 -L/home/zaspel/libs/openmpi/lib -L. -o test_kernel_cg test_kernel_cg.o kernel.o -lcudart -lcurand -lmpi_cxx -lmpi -lmpla -lcublas

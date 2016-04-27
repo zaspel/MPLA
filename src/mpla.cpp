@@ -28,14 +28,6 @@ void info()
 	printf("Hello world\n");
 }
 
-void checkCUDAError(const char* msg) {
-cudaError_t err = cudaGetLastError();
-  if (cudaSuccess != err) {
-    fprintf(stderr, "Cuda error: %s: %s.\n", msg, cudaGetErrorString(err));
-    exit(EXIT_FAILURE);
-  }
-}
-
 
 
 void mpla_init_instance(struct mpla_instance* instance, MPI_Comm comm)
@@ -179,6 +171,112 @@ void mpla_init_matrix(struct mpla_matrix* matrix, struct mpla_instance* instance
 	cudaMalloc((void**)&(matrix->data), sizeof(double)*matrix->cur_proc_row_count*matrix->cur_proc_col_count);
 	cudaThreadSynchronize();
 	checkCUDAError("cudaMalloc");
+}
+
+void mpla_init_generic_matrix(struct mpla_generic_matrix* matrix, struct mpla_instance* instance, int mat_row_count, int mat_col_count)
+{
+	// setting global matrix dimensions
+	matrix->mat_row_count = mat_row_count;
+	matrix->mat_col_count = mat_col_count;
+
+	// allocating memory for process-wise matrix information
+	matrix->proc_row_count = new int*[instance->proc_rows];
+	matrix->proc_col_count = new int*[instance->proc_rows];
+	matrix->proc_row_offset = new int*[instance->proc_rows];
+	matrix->proc_col_offset = new int*[instance->proc_rows];
+	for (int i=0; i<instance->proc_rows; i++)
+	{
+		matrix->proc_row_count[i] = new int[instance->proc_cols];
+		matrix->proc_col_count[i] = new int[instance->proc_cols];
+		matrix->proc_row_offset[i] = new int[instance->proc_cols];
+		matrix->proc_col_offset[i] = new int[instance->proc_cols];
+	}
+
+/*
+	// computing general row block sizes
+	int filled_row_block_size = ceil((float)mat_row_count / (float)(instance->proc_rows));
+//	int filled_row_block_count = mat_row_count / filled_row_block_size;
+	int last_row_block_size =  mat_row_count % filled_row_block_size;
+
+	// computing general column block sizes
+	int filled_col_block_size = ceil((float)mat_col_count / (float)(instance->proc_cols));
+//	int filled_col_block_count = mat_col_count / filled_col_block_size;
+	int last_col_block_size =  mat_col_count % filled_col_block_size;
+
+
+	// computing process-wise block row / column counts
+	for (int i=0; i < instance->proc_rows; i++)
+	{
+		for (int j=0; j < instance->proc_cols; j++)
+		{
+			if ((i==(instance->proc_rows-1)) && (last_row_block_size>0)) // handling last row block which is only partially filled
+				matrix->proc_row_count[i][j] = last_row_block_size;
+			else
+				matrix->proc_row_count[i][j] = filled_row_block_size;
+	
+			if ((j==(instance->proc_cols-1)) && (last_col_block_size>0)) // handling last column block which is only partially filled
+				matrix->proc_col_count[i][j] = last_col_block_size;
+			else
+				matrix->proc_col_count[i][j] = filled_col_block_size;
+		}
+	}
+*/
+	
+	// computing general row block sizes
+	int almost_filled_row_block_size = mat_row_count / instance->proc_rows;
+	int remaining_rows = mat_row_count % instance->proc_rows;
+	if (almost_filled_row_block_size == 0)
+	{
+		printf("MPLA: There are more process block rows than matrix rows. Exiting...\n");
+		exit(1);
+	}
+
+
+	// computing general column block sizes
+	int almost_filled_col_block_size = mat_col_count / instance->proc_cols;
+	int remaining_cols = mat_col_count % instance->proc_cols;
+
+	if (almost_filled_row_block_size == 0)
+	{
+		printf("MPLA: There are more process block columns than matrix columns. Exiting...\n");
+		exit(1);
+	}
+
+
+	// computing process-wise block row / column counts
+	for (int i=0; i< instance->proc_rows; i++)
+	{
+		for (int j=0; j<instance->proc_cols; j++)
+		{
+			matrix->proc_row_count[i][j] = almost_filled_row_block_size + ( (i<remaining_rows) ? 1 : 0 );
+			matrix->proc_col_count[i][j] = almost_filled_col_block_size + ( (j<remaining_cols) ? 1 : 0 );
+		}
+	}
+	
+
+
+
+	// computing process-wise block row / column offsets
+	matrix->proc_row_offset[0][0] = 0;
+	matrix->proc_col_offset[0][0] = 0;
+	for (int i=1; i<instance->proc_rows; i++)
+		matrix->proc_col_offset[i][0] = 0;
+	for (int j=1; j<instance->proc_cols; j++)
+		matrix->proc_row_offset[0][j] = 0;
+	for (int i=1; i < instance->proc_rows; i++)
+		for (int j=0; j < instance->proc_cols; j++)
+			matrix->proc_row_offset[i][j] = matrix->proc_row_offset[i-1][j] + matrix->proc_row_count[i-1][j];
+	for (int j=1; j < instance->proc_cols; j++)
+		for (int i=0; i < instance->proc_rows; i++)
+			matrix->proc_col_offset[i][j] = matrix->proc_col_offset[i][j-1] + matrix->proc_col_count[i][j-1];
+		
+	// retrieving local data for the current process
+	matrix->cur_proc_row_count = matrix->proc_row_count[instance->cur_proc_row][instance->cur_proc_col];
+	matrix->cur_proc_col_count = matrix->proc_col_count[instance->cur_proc_row][instance->cur_proc_col];
+	matrix->cur_proc_row_offset = matrix->proc_row_offset[instance->cur_proc_row][instance->cur_proc_col];
+	matrix->cur_proc_col_offset = matrix->proc_col_offset[instance->cur_proc_row][instance->cur_proc_col];
+
+	// no matrix data storage allocation, since the user controls the content of the custom data
 }
 
 void mpla_init_vector(struct mpla_vector* vector, struct mpla_instance* instance, int vec_row_count)
@@ -443,6 +541,21 @@ void mpla_free_matrix(struct mpla_matrix* A, struct mpla_instance* instance)
 	delete [] A->proc_col_offset;
 }
 
+void mpla_free_generic_matrix(struct mpla_generic_matrix* A, struct mpla_instance* instance)
+{
+	for (int i=0; i<instance->proc_rows; i++)
+	{
+		delete [] A->proc_row_count[i];
+		delete [] A->proc_row_offset[i];
+		delete [] A->proc_col_count[i];
+		delete [] A->proc_col_offset[i];
+	}
+	delete [] A->proc_row_count;
+	delete [] A->proc_row_offset;
+	delete [] A->proc_col_count;
+	delete [] A->proc_col_offset;
+}
+
 void mpla_dgemv(struct mpla_vector* b, struct mpla_matrix* A, struct mpla_vector* x, struct mpla_instance* instance)
 {
 	double one = 1;
@@ -606,3 +719,13 @@ void mpla_generic_conjugate_gradient(struct mpla_vector* b, struct mpla_generic_
 	mpla_free_vector(&d, instance);
 	mpla_free_vector(&z, instance);
 }
+
+void checkCUDAError(const char* msg) {
+cudaError_t err = cudaGetLastError();
+  if (cudaSuccess != err) {
+    fprintf(stderr, "Cuda error: %s: %s.\n", msg, cudaGetErrorString(err));
+    exit(EXIT_FAILURE);
+  }
+}
+
+
