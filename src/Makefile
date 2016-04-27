@@ -34,8 +34,8 @@ titan:
 	CC -lcudart -fPIC -o libmpla.so --shared mpla.cpp
 	CC -lcurand -L. -lmpla -lcublas -o benchmark_dgemv benchmark_dgemv.cpp
 	CC -lcurand -L. -lmpla -lcublas -o benchmark_cg benchmark_cg.cpp
-	nvcc -O3 -c -arch=sm_30 -I/home/zaspel/libs/openmpi/include kernel.cu -o kernel.o
-	CC -lcurand -L. -lmpla -lcublas -o benchmark_kernel_cg benchmark_kernel_cg.cpp
+	nvcc -O3 -c -arch=sm_30 -I$(MPICH_DIR)/include kernel.cu -o kernel.o
+	CC -lcurand -L. -lmpla -lcublas kernel.o -o benchmark_kernel_cg benchmark_kernel_cg.cpp
 
 clean:
 	rm *.o *.so test_library benchmark_dgemv
