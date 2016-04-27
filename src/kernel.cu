@@ -68,7 +68,6 @@ void mpla_dgemv_core_kernel_cublas(struct mpla_vector* b, struct mpla_generic_ma
 
 void mpla_dgemv_core_kernel_streamed_cublas(struct mpla_vector* b, struct mpla_generic_matrix* A, struct mpla_vector* x_redist, struct mpla_instance* instance)
 {
-	printf("Applying MVP\n");
 	int max_row_count = ((struct kernel_matrix_data*)(A->data))->max_row_count_per_dgemv;
 
 	double* Amat;
@@ -84,11 +83,12 @@ void mpla_dgemv_core_kernel_streamed_cublas(struct mpla_vector* b, struct mpla_g
 
 	int curr_row_block_offset = A->cur_proc_row_offset;
 
-	printf("rbc %d  mrc %d\n", row_block_count, max_row_count);
+	printf("mrc %d   rbc: %d\n", max_row_count, row_block_count);
 
 	for (int curr_row_block=0; curr_row_block<row_block_count; curr_row_block++)
 	{
 		int curr_row_block_size = (curr_row_block < row_block_count-1) ? max_row_count : A->cur_proc_row_count-(max_row_count*(row_block_count-1));
+		printf("crbs: %d\n", curr_row_block_size);
 		gen_dis_matrix3<<<grid_size, block_size>>>(Amat, points, curr_row_block_size, A->cur_proc_col_count, curr_row_block_offset, A->cur_proc_col_offset);
 		cudaThreadSynchronize();
 		checkCUDAError("gen_dist_matrix3");

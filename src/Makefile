@@ -22,7 +22,9 @@ benchmark: shared
 	g++ -L/usr/local/cuda/lib64 -L/home/zaspel/libs/openmpi/lib -L. -o benchmark_dgemv benchmark_dgemv.o -lcudart -lcurand -lmpi_cxx -lmpi -lmpla -lcublas
 	g++ -c -I/usr/local/cuda/include -I/home/zaspel/libs/openmpi/include -o benchmark_cg.o benchmark_cg.cpp
 	g++ -L/usr/local/cuda/lib64 -L/home/zaspel/libs/openmpi/lib -L. -o benchmark_cg benchmark_cg.o -lcudart -lcurand -lmpi_cxx -lmpi -lmpla -lcublas
-
+	nvcc -O3 -c -arch=sm_30 -I/home/zaspel/libs/openmpi/include kernel.cu -o kernel.o
+	g++ -c -I/usr/local/cuda/include -I/home/zaspel/libs/openmpi/include -o benchmark_kernel_cg.o benchmark_kernel_cg.cpp
+	g++ -L/usr/local/cuda/lib64 -L/home/zaspel/libs/openmpi/lib -L. -o benchmark_kernel_cg benchmark_kernel_cg.o kernel.o -lcudart -lcurand -lmpi_cxx -lmpi -lmpla -lcublas
 
 
 shared:
