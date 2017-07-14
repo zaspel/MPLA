@@ -1,0 +1,18 @@
+#!/bin/bash
+#PBS -A csc238
+#PBS -N generate_quadrature_weights_3d_hmatrix
+#PBS -j oe
+#PBS -l walltime=01:00:00,nodes=1
+
+
+module swap PrgEnv-pgi PrgEnv-gnu
+module load cudatoolkit 
+module load gsl
+export MPICH_RDMA_ENABLED_CUDA=1
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/gcc/4.9.3/snos/lib64:/lib:/lustre/atlas/proj-shared/csc238/MPLA/src:/lustre/atlas/proj-shared/csc238/hmglib/src:${GSL_DIR}/lib
+
+cd /lustre/atlas/proj-shared/csc238/MPLA/src/3d_hmatrix
+
+aprun -n 1 -N 1 ../h_matrix_test_2d_parallel 65536 2 1.0e-9 0 10 40 2048 -5 10000
+
+

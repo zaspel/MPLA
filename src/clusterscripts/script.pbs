@@ -1,0 +1,17 @@
+#!/bin/bash
+#PBS -A csc238
+#PBS -N quadrature_weights_10d
+#PBS -j oe
+#PBS -l walltime=03:00:00,nodes=512
+
+module swap PrgEnv-pgi PrgEnv-gnu
+module load cudatoolkit 
+module load gsl
+export MPICH_RDMA_ENABLED_CUDA=1
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$GSL_DIR/lib:/lustre/atlas/proj-shared/csc238/MPLA/src
+
+cd /lustre/atlas/proj-shared/csc238/MPLA/src/10d
+
+aprun -n 512 -N 1 ../generate_quadrature_weights 250000 10 1.0e-8 1 100
+
+
