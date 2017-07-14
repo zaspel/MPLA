@@ -81,6 +81,10 @@ extern void info();
 
 extern void mpla_init_instance(struct mpla_instance* instance, MPI_Comm comm);
 
+extern void mpla_init_instance_block_rows(struct mpla_instance* instance, MPI_Comm comm);
+
+extern void mpla_destroy_instance(struct mpla_instance* instance);
+
 extern void mpla_init_matrix(struct mpla_matrix* matrix, struct mpla_instance* instance, int mat_row_count, int mat_col_count);
 
 extern void mpla_init_generic_matrix(struct mpla_generic_matrix* matrix, struct mpla_instance* instance, int mat_row_count, int mat_col_count);
@@ -90,6 +94,10 @@ extern void mpla_init_vector(struct mpla_vector* vector, struct mpla_instance* i
 extern void mpla_init_vector_for_block_rows(struct mpla_vector* vector, struct mpla_instance* instance, int vec_row_count);
 
 extern void mpla_redistribute_vector_for_dgesv(struct mpla_vector* b_redist, struct mpla_vector* b, struct mpla_matrix* A, struct mpla_instance* instance);
+
+extern void mpla_save_vector(struct mpla_vector* x, char* filename, struct mpla_instance* instance);
+
+extern void mpla_load_vector(struct mpla_vector* x, char* filename, struct mpla_instance* instance);
 
 extern void mpla_free_vector(struct mpla_vector* x, struct mpla_instance* instance);
 
@@ -108,6 +116,10 @@ extern void mpla_daxpy(struct mpla_vector* y, double alpha, struct mpla_vector* 
 extern void mpla_vector_set_zero(struct mpla_vector* x, struct mpla_instance* instance);
 
 extern void mpla_generic_conjugate_gradient(struct mpla_vector* b, struct mpla_generic_matrix* A, struct mpla_vector* x, int iter_max, double epsilon, void (*mpla_dgemv_core)(struct mpla_vector*, struct mpla_generic_matrix*, struct mpla_vector*, struct mpla_instance*), struct mpla_instance* instance);
+
+extern void mpla_generic_conjugate_gradient_with_checkpoint_restart(struct mpla_vector* b, struct mpla_generic_matrix* A, struct mpla_vector* x, int iter_max, double epsilon, void (*mpla_dgemv_core)(struct mpla_vector*, struct mpla_generic_matrix*, struct mpla_vector*, struct mpla_instance*), int iterations_until_checkpoint, bool restart, struct mpla_instance* instance);
+
+extern void mpla_generic_BiCGSTAB_with_checkpoint_restart(struct mpla_vector* b, struct mpla_generic_matrix* A, struct mpla_vector* x, int iter_max, double epsilon, void (*mpla_dgemv_core)(struct mpla_vector*, struct mpla_generic_matrix*, struct mpla_vector*, struct mpla_instance*), int iterations_until_checkpoint, bool restart, struct mpla_instance* instance);
 
 extern void checkCUDAError(const char* msg);
 

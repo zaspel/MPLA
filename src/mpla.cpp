@@ -64,6 +64,48 @@ void mpla_init_instance(struct mpla_instance* instance, MPI_Comm comm)
 	
 }
 
+void mpla_init_instance_block_rows(struct mpla_instance* instance, MPI_Comm comm)
+{
+        instance->comm = comm;
+
+        // get number of process
+        MPI_Comm_size(comm, &(instance->proc_count));
+
+        // find number of current process
+        MPI_Comm_rank(comm, &(instance->cur_proc_rank));
+        if (instance->cur_proc_rank==0)
+                instance->is_parent = true;
+        else
+                instance->is_parent = false;
+
+        // compute the process grid, enforcing only a parallelization over rows
+        int dims[2];
+        dims[0]=instance->proc_count;
+	dims[1]=1;
+        MPI_Dims_create(instance->proc_count, 2, dims);
+        instance->proc_rows = dims[0];
+        instance->proc_cols = dims[1];
+
+        // create cartesian communicator and retrieve cartesian coordinates
+        int periods[2];
+        periods[0]=periods[1]=0;
+        MPI_Cart_create(comm, 2, dims, periods, 0, &(instance->comm));
+        int cur_proc_coord[2];
+        MPI_Cart_get(instance->comm, 2, dims, periods, cur_proc_coord);
+        instance->cur_proc_row = cur_proc_coord[0];
+        instance->cur_proc_col = cur_proc_coord[1];;
+
+        cublasCreate(&(instance->cublas_handle));
+
+}
+
+
+void mpla_destroy_instance(struct mpla_instance* instance)
+{
+	cublasDestroy((instance->cublas_handle));
+}
+
+
 void mpla_init_matrix(struct mpla_matrix* matrix, struct mpla_instance* instance, int mat_row_count, int mat_col_count)
 {
 	// setting global matrix dimensions
@@ -470,6 +512,8 @@ void mpla_redistribute_vector_for_dgesv(struct mpla_vector* b_redist, struct mpl
 
 	// memory cleanup
 	cudaFree(full_vector);
+
+	MPI_Comm_free(&column_comm);
 }
 
 void mpla_redistribute_vector_for_generic_dgesv(struct mpla_vector* b_redist, struct mpla_vector* b, struct mpla_generic_matrix* A, struct mpla_instance* instance)
@@ -508,6 +552,9 @@ void mpla_redistribute_vector_for_generic_dgesv(struct mpla_vector* b_redist, st
 
 	// memory cleanup
 	cudaFree(full_vector);
+
+
+	MPI_Comm_free(&column_comm);
 }
 
 
@@ -556,6 +603,85 @@ void mpla_free_generic_matrix(struct mpla_generic_matrix* A, struct mpla_instanc
 	delete [] A->proc_col_offset;
 }
 
+void mpla_save_vector(struct mpla_vector* x, char* filename, struct mpla_instance* instance)
+{
+        // create sub-communicator for each process column
+        int remain_dims[2];
+        remain_dims[0]=1;
+        remain_dims[1]=0;
+        MPI_Comm column_comm;
+        MPI_Cart_sub(instance->comm, remain_dims, &column_comm);
+        int column_rank;
+        MPI_Comm_rank(column_comm, &column_rank);
+
+        // columnwise creation of the full vector
+        double* full_vector;
+        int* recvcounts = new int[instance->proc_rows];
+        int* displs = new int[instance->proc_rows];
+        for (int i=0; i<instance->proc_rows; i++)
+        {
+                recvcounts[i] = x->proc_row_count[i][instance->cur_proc_col];
+                displs[i] = x->proc_row_offset[i][instance->cur_proc_col];
+        }
+        cudaMalloc((void**)&full_vector, sizeof(double)*x->vec_row_count);
+        cudaThreadSynchronize();
+        checkCUDAError("cudaMalloc");
+        MPI_Allgatherv(x->data, x->cur_proc_row_count, MPI_DOUBLE, full_vector, recvcounts, displs, MPI_DOUBLE, column_comm);
+
+	// writing full vector to file on parent process	
+	if (instance->is_parent)
+	{
+		FILE* f = fopen(filename, "wb");
+
+		double* full_vector_host = new double[x->vec_row_count];
+		cudaMemcpy(full_vector_host, full_vector, x->vec_row_count*sizeof(double), cudaMemcpyDeviceToHost);
+	
+		fwrite(&(x->vec_row_count), sizeof(int), 1, f);
+			
+		fwrite(full_vector_host, sizeof(double), x->vec_row_count, f);
+
+		fclose(f);	
+
+		delete [] full_vector_host;
+	}
+
+        // memory cleanup
+        cudaFree(full_vector);
+	MPI_Comm_free(&column_comm);
+
+	MPI_Barrier(instance->comm);
+}
+
+void mpla_load_vector(struct mpla_vector* x, char* filename, struct mpla_instance* instance)
+{
+        // reading full vector on all processes        
+        FILE* f = fopen(filename, "rb");
+
+	int vec_row_count;
+
+        fread(&vec_row_count, sizeof(int), 1, f);
+
+	if (vec_row_count!=x->vec_row_count)
+	{
+		printf("Loaded vector does not fit to vector size required by the program.\n");
+		fflush(stdout);
+		exit(1);
+	}
+
+        double* full_vector_host = new double[x->vec_row_count];
+	
+        fread(full_vector_host, sizeof(double), x->vec_row_count, f);
+
+        cudaMemcpy(x->data, &full_vector_host[x->cur_proc_row_offset], x->cur_proc_row_count*sizeof(double), cudaMemcpyHostToDevice);
+
+        fclose(f);
+
+        delete [] full_vector_host;
+
+	MPI_Barrier(instance->comm);
+}
+
+
 void mpla_dgemv(struct mpla_vector* b, struct mpla_matrix* A, struct mpla_vector* x, struct mpla_instance* instance)
 {
 	double one = 1;
@@ -589,6 +715,8 @@ void mpla_dgemv(struct mpla_vector* b, struct mpla_matrix* A, struct mpla_vector
 	// cleanup
 	cudaFree(sum);
 	mpla_free_vector(&x_redist, instance);
+
+	MPI_Comm_free(&row_comm);
 }
 
 void mpla_ddot(double* xy, struct mpla_vector* x, struct mpla_vector* y, struct mpla_instance* instance)
@@ -606,6 +734,8 @@ void mpla_ddot(double* xy, struct mpla_vector* x, struct mpla_vector* y, struct 
 
 	// parallel summation and communication
 	MPI_Allreduce(&xy_tmp, xy, 1, MPI_DOUBLE, MPI_SUM, column_comm);
+
+	MPI_Comm_free(&column_comm);
 }
 
 void mpla_generic_dgemv(struct mpla_vector* b, struct mpla_generic_matrix* A, struct mpla_vector* x, void (*mpla_dgemv_core)(struct mpla_vector*, struct mpla_generic_matrix*, struct mpla_vector*, struct mpla_instance*), struct mpla_instance* instance)
@@ -638,6 +768,8 @@ void mpla_generic_dgemv(struct mpla_vector* b, struct mpla_generic_matrix* A, st
 	// cleanup
 	cudaFree(sum);
 	mpla_free_vector(&x_redist, instance);
+
+	MPI_Comm_free(&row_comm);
 }
 
 void mpla_daxpy(struct mpla_vector* y, double alpha, struct mpla_vector* x, struct mpla_instance* instance)
@@ -719,6 +851,306 @@ void mpla_generic_conjugate_gradient(struct mpla_vector* b, struct mpla_generic_
 	mpla_free_vector(&d, instance);
 	mpla_free_vector(&z, instance);
 }
+
+void mpla_generic_conjugate_gradient_with_checkpoint_restart(struct mpla_vector* b, struct mpla_generic_matrix* A, struct mpla_vector* x, int iter_max, double epsilon, void (*mpla_dgemv_core)(struct mpla_vector*, struct mpla_generic_matrix*, struct mpla_vector*, struct mpla_instance*), int iterations_until_checkpoint, bool restart, struct mpla_instance* instance)
+{
+        // init some vectors
+        struct mpla_vector r;
+        struct mpla_vector d;
+        struct mpla_vector z;
+        mpla_init_vector(&r, instance, x->vec_row_count);
+        mpla_init_vector(&d, instance, x->vec_row_count);
+        mpla_init_vector(&z, instance, x->vec_row_count);
+
+        double alpha,beta;
+
+	// compute ||b||
+	double b_norm;
+	mpla_ddot(&b_norm, b, b, instance);
+	b_norm = sqrt(b_norm);
+
+        // r_0 = b - A * x_0
+        mpla_generic_dgemv(&z, A, x, mpla_dgemv_core, instance);
+        mpla_vector_set_zero(&r, instance);
+        mpla_daxpy(&r, 1, b, instance);
+        mpla_daxpy(&r, -1, &z, instance);
+
+        // d_0 = r_0
+        mpla_vector_set_zero(&d, instance);
+        mpla_daxpy(&d, 1, &r, instance);
+
+        double res;
+        mpla_ddot(&res, &r, &r, instance);
+//      printf("%d: %e\n", 0, sqrt(res/(double)(x->vec_row_count)));
+
+	int k;	
+
+	double rel_res_norm = sqrt(res)/b_norm;
+
+	if (restart)
+	{
+		char filename[100];
+		sprintf(filename,"x.dat");
+		mpla_load_vector(x, filename, instance);
+		sprintf(filename,"r.dat");
+		mpla_load_vector(&r, filename, instance);
+		sprintf(filename,"d.dat");
+		mpla_load_vector(&d, filename, instance);
+		sprintf(filename,"z.dat");
+		mpla_load_vector(&z, filename, instance);
+	}
+
+
+        if (rel_res_norm>=epsilon)
+        for (k=1; k<iter_max; k++)
+        {
+		// z = A * d_k
+                mpla_generic_dgemv(&z, A, &d, mpla_dgemv_core, instance);
+
+                // alpha_k = <r_k,r_k>/<d_k, z>
+                double t1,t2;
+                mpla_ddot(&t1, &r, &r, instance);
+                mpla_ddot(&t2, &d, &z, instance);
+                alpha = t1 / t2;
+
+                // x_{k+1} = x_k + alpha_k d_k
+                mpla_daxpy(x, alpha, &d, instance);
+
+                // r_{k+1} = r_k - alpha_k z
+                mpla_daxpy(&r, -alpha, &z, instance);
+
+                // beta_k = <r_{k+1}, r_{k+1}> / <r_k, r_k>
+                mpla_ddot(&t2, &r, &r, instance);
+                beta = t2 / t1;
+
+//              printf("%d: %e\n", k, sqrt(t2/(double)(x->vec_row_count)));
+
+                if ((k%2 == 0) && (instance->is_parent))
+			printf("Iteration: %d\t Relative residual norm: %le\n", k, sqrt(t2)/b_norm);
+
+		rel_res_norm = sqrt(t2)/b_norm;
+
+                if (rel_res_norm<epsilon)
+                {
+                        break;
+                }
+
+                // d_{k+1} = r_{k+1} + beta_k d_k
+                mpla_vector_set_zero(&z, instance);
+                mpla_daxpy(&z, beta, &d, instance);
+                mpla_daxpy(&z, 1, &r, instance);
+                mpla_vector_set_zero(&d, instance);
+                mpla_daxpy(&d, 1, &z, instance);
+
+		if (k % iterations_until_checkpoint == 0)
+		{
+			char filename[100];
+			if (instance->is_parent) printf("Checkpointing...\n");
+
+			sprintf(filename, "x.dat");
+			mpla_save_vector(x, filename, instance);
+			sprintf(filename, "r.dat");
+			mpla_save_vector(&r, filename, instance);
+			sprintf(filename, "d.dat");
+			mpla_save_vector(&d, filename, instance);
+			sprintf(filename, "z.dat");
+			mpla_save_vector(&z, filename, instance);
+
+		}
+        }
+
+	if (instance->is_parent)
+		printf("MPLA CG stopped after %d iterations with a final relative residual norm of %le.\n", k, rel_res_norm);
+
+        // memory cleanup
+        mpla_free_vector(&r, instance);
+        mpla_free_vector(&d, instance);
+        mpla_free_vector(&z, instance);
+}
+
+void mpla_generic_BiCGSTAB_with_checkpoint_restart(struct mpla_vector* b, struct mpla_generic_matrix* A, struct mpla_vector* x, int iter_max, double epsilon, void (*mpla_dgemv_core)(struct mpla_vector*, struct mpla_generic_matrix*, struct mpla_vector*, struct mpla_instance*), int iterations_until_checkpoint, bool restart, struct mpla_instance* instance)
+{
+        // init some vectors
+        struct mpla_vector r;
+	struct mpla_vector r_hat;
+        struct mpla_vector p;
+        struct mpla_vector z;
+        struct mpla_vector zz;
+	struct mpla_vector s;
+        mpla_init_vector(&r, instance, x->vec_row_count);
+        mpla_init_vector(&r_hat, instance, x->vec_row_count);
+        mpla_init_vector(&z, instance, x->vec_row_count);
+        mpla_init_vector(&zz, instance, x->vec_row_count);
+	mpla_init_vector(&s, instance, x->vec_row_count);
+	mpla_init_vector(&p, instance, x->vec_row_count);
+
+        double rho, alpha, omega, beta;
+
+
+	// compute ||b||
+	double b_norm;
+	mpla_ddot(&b_norm, b, b, instance);
+	b_norm = sqrt(b_norm);
+
+	printf("b_norm %le\n", b_norm);
+
+
+        // r_0 = b - A * x_0
+        mpla_generic_dgemv(&z, A, x, mpla_dgemv_core, instance);
+	double ttt;
+	mpla_ddot(&ttt, &z, &z, instance);
+	printf("z %le\n", ttt);
+
+	double sss;
+	mpla_ddot(&sss, x, x, instance);
+	printf("x %le\n", sss);
+
+        mpla_vector_set_zero(&r, instance);
+        mpla_daxpy(&r, 1, b, instance);
+        mpla_daxpy(&r, -1, &z, instance);
+
+	// r_hat_0 = r_0
+	mpla_vector_set_zero(&r_hat, instance);
+	mpla_daxpy(&r_hat, 1, &r, instance);
+
+	// p_0 = r_0
+	mpla_vector_set_zero(&p, instance);
+	mpla_daxpy(&p, 1, &r, instance);
+
+        double res;
+        mpla_ddot(&res, &r, &r, instance);
+	printf("res %le\n",res);
+
+//      printf("%d: %e\n", 0, sqrt(res/(double)(x->vec_row_count)));
+
+	int k;	
+
+	double rel_res_norm = sqrt(res)/b_norm;
+
+	if (restart)
+	{
+		char filename[100];
+		sprintf(filename,"x.dat");
+		mpla_load_vector(x, filename, instance);
+		sprintf(filename,"r.dat");
+		mpla_load_vector(&r, filename, instance);
+		sprintf(filename,"r_hat.dat");
+		mpla_load_vector(&r_hat, filename, instance);
+		sprintf(filename,"z.dat");
+		mpla_load_vector(&z, filename, instance);
+		sprintf(filename,"zz.dat");
+		mpla_load_vector(&zz, filename, instance);
+		sprintf(filename,"s.dat");
+		mpla_load_vector(&s, filename, instance);
+		sprintf(filename,"p.dat");
+		mpla_load_vector(&p, filename, instance);
+
+	}
+
+
+
+        if (rel_res_norm>=epsilon)
+        for (k=1; k<iter_max; k++)
+        {
+		double tmp1;
+		double tmp2;
+		double r_i_r_hat;
+
+		// alpha_k = <r_hat, r_k-1> / <A * p_k, r_hat>
+		mpla_ddot(&tmp1, &r_hat, &r, instance);
+		mpla_generic_dgemv(&z, A, &p, mpla_dgemv_core, instance);
+		mpla_ddot(&tmp2, &z, &r_hat, instance);
+		alpha = tmp1 / tmp2;
+		r_i_r_hat = tmp1;
+
+		printf("tmp1 tmp2 %le %le\n", tmp1,tmp2);
+
+		// s_k = r_k - alpha * z;
+		mpla_vector_set_zero(&s, instance);
+		mpla_daxpy(&s, 1, &r, instance);
+		mpla_daxpy(&s, -alpha, &z, instance);
+
+		// omega = <A * s, s> / <A * s, A * s>
+		mpla_generic_dgemv(&zz, A, &s, mpla_dgemv_core, instance);
+		mpla_ddot(&tmp1, &zz, &s, instance);
+		mpla_ddot(&tmp2, &zz, &zz, instance);
+		printf("tmp1 tmp2 2 %le %le\n", tmp1, tmp2);
+		omega = tmp1/tmp2;
+
+		// x_k+1 = x_k + alpha*p + omega*s
+		mpla_daxpy(x, alpha, &p, instance);
+		mpla_daxpy(x, omega, &s, instance);
+		
+		// r_k+1 = s_k - omega * zz
+		mpla_vector_set_zero(&r, instance);
+		mpla_daxpy(&r, 1, &s, instance);
+		mpla_daxpy(&r, -omega, &zz, instance);
+
+		// beta = (alpha/omega)*((r_k,r_hat) / r_i_r_hat)
+		mpla_ddot(&tmp1, &r, &r_hat, instance);
+		beta = (alpha/omega) * (tmp1 / r_i_r_hat);
+
+		// p_k+1 = r_k+1 + beta * (p - omega * A * p)
+		mpla_vector_set_zero(&zz, instance);
+		mpla_daxpy(&zz, 1, &p, instance);
+		mpla_daxpy(&zz, -omega, &z, instance);
+		mpla_vector_set_zero(&p, instance);
+		mpla_daxpy(&p, 1, &r, instance);
+		mpla_daxpy(&p, beta, &zz, instance);
+
+		mpla_generic_dgemv(&z, A, x, mpla_dgemv_core, instance);
+		mpla_vector_set_zero(&zz, instance);
+		mpla_daxpy(&zz, 1, b, instance);
+		mpla_daxpy(&zz, -1, &z, instance);
+
+		mpla_ddot(&rel_res_norm, &zz, &zz, instance);
+		rel_res_norm = sqrt(rel_res_norm)/b_norm;
+
+	
+//              printf("%d: %e\n", k, sqrt(t2/(double)(x->vec_row_count)));
+
+                if ((k%1 == 0) && (instance->is_parent))
+			printf("Iteration: %d\t Relative residual norm: %le\n", k, rel_res_norm);
+
+                if (rel_res_norm<epsilon)
+                {
+                        break;
+                }
+
+		if (k % iterations_until_checkpoint == 0)
+		{
+			char filename[100];
+			if (instance->is_parent) printf("Checkpointing...\n");
+			sprintf(filename, "x.dat");
+			mpla_save_vector(x, filename, instance);
+			sprintf(filename, "r.dat");
+			mpla_save_vector(&r, filename, instance);
+			sprintf(filename, "r_hat.dat");
+			mpla_save_vector(&r_hat, filename, instance);
+			sprintf(filename, "z.dat");
+			mpla_save_vector(&z, filename, instance);
+			sprintf(filename, "zz.dat");
+			mpla_save_vector(&zz, filename, instance);
+			sprintf(filename, "s.dat");
+			mpla_save_vector(&s, filename, instance);
+			sprintf(filename, "p.dat");
+			mpla_save_vector(&p, filename, instance);
+		}
+        }
+
+	if (instance->is_parent)
+		printf("MPLA CG stopped after %d iterations with a final relative residual norm of %le.\n", k, rel_res_norm);
+
+        // memory cleanup
+        mpla_free_vector(&r, instance);
+        mpla_free_vector(&z, instance);
+        mpla_free_vector(&zz, instance);
+	mpla_free_vector(&p, instance);
+	mpla_free_vector(&s, instance);
+	mpla_free_vector(&r_hat, instance);
+}
+
+
 
 void checkCUDAError(const char* msg) {
 cudaError_t err = cudaGetLastError();

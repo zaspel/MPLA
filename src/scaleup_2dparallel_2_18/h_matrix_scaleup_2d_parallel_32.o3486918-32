@@ -1,0 +1,36 @@
+Setup time: Elapsed time: 333.532288 ms
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+[NID 17611] 2017-07-07 09:32:21 Apid 14941085: initiated application termination
+Application 14941085 exit codes: 1
+Application 14941085 exit signals: Killed
+Application 14941085 resources: utime ~507s, stime ~738s, Rss ~323176, inblocks ~80290, outblocks ~42784

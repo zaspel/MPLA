@@ -1,0 +1,17 @@
+Setup time: Elapsed time: 283.296722 ms
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+Cuda error: cudaMalloc: out of memory.
+[NID 03784] 2017-07-07 09:30:38 Apid 14941037: initiated application termination
+Application 14941037 exit codes: 1
+Application 14941037 exit signals: Killed
+Application 14941037 resources: utime ~200s, stime ~320s, Rss ~257548, inblocks ~43658, outblocks ~21392

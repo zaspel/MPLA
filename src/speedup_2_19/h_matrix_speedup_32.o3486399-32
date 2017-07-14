@@ -1,0 +1,8 @@
+Setup time: Elapsed time: 102.299644 ms
+Iteration: 2	 Relative residual norm: 3.746608e+02
+Iteration: 4	 Relative residual norm: 1.600811e+01
+Iteration: 6	 Relative residual norm: 6.852059e+01
+Iteration: 8	 Relative residual norm: 6.006220e+01
+MPLA CG stopped after 10 iterations with a final relative residual norm of 2.238329e+02.
+Solve time: Elapsed time: 25104.113281 ms
+Application 14934674 resources: utime ~609s, stime ~233s, Rss ~202260, inblocks ~126122, outblocks ~51169
