@@ -121,6 +121,8 @@ extern void mpla_generic_conjugate_gradient_with_checkpoint_restart(struct mpla_
 
 extern void mpla_generic_BiCGSTAB_with_checkpoint_restart(struct mpla_vector* b, struct mpla_generic_matrix* A, struct mpla_vector* x, int iter_max, double epsilon, void (*mpla_dgemv_core)(struct mpla_vector*, struct mpla_generic_matrix*, struct mpla_vector*, struct mpla_instance*), int iterations_until_checkpoint, bool restart, struct mpla_instance* instance);
 
+extern void mpla_copy_distributed_vector_to_cpu(double* x_cpu, struct mpla_vector* x, struct mpla_instance* instance);
+
 extern void checkCUDAError(const char* msg);
 
 #endif

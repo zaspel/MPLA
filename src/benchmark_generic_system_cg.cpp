@@ -21,7 +21,10 @@
 #include <curand.h>
 #include <stdlib.h>
 
-#include "kernel.h"  // for now a dirty hack!!!
+//#include "kernel.h"  // for now a dirty hack!!!
+
+#include "generic_system_adapter.h"
+#include "kernel_system_assembly.h"
 
 int idx(int i, int j, int m, int n)
 {
@@ -49,8 +52,8 @@ int main(int argc, char* argv[])
 		trials = atoi(argv[2]);
 
 	void (*mpla_dgemv_core)(struct mpla_vector*, struct mpla_generic_matrix*, struct mpla_vector*, struct mpla_instance*);
-	mpla_dgemv_core = &mpla_dgemv_core_kernel_streamed_cublas;
-//	mpla_dgemv_core = &mpla_dgemv_core_kernel_cublas;
+//	mpla_dgemv_core = &mpla_dgemv_core_generic_system_matrix_cublas;
+	mpla_dgemv_core = &mpla_dgemv_core_generic_system_matrix_streamed_cublas;
 
 	MPI_Init( &argc, &argv );
 
@@ -89,19 +92,29 @@ int main(int argc, char* argv[])
 	cudaMemcpy(points, points_ptr_on_host, sizeof(double*)*3, cudaMemcpyHostToDevice);
 
 	// setup data structure with kernel matrix data
-	struct kernel_matrix_data matrix_data;
-	matrix_data.points = points;
-	matrix_data.max_row_count_per_dgemv = calculate_max_row_count( A.cur_proc_row_count, A.cur_proc_col_count);
-	matrix_data.dim = 3;
-	A.data = (void*)&matrix_data;
+	struct gaussian_kernel_system_assembly assem;
+	assem.points = points;
+	assem.max_row_count_per_dgemv = calculate_max_row_count( A.cur_proc_row_count, A.cur_proc_col_count);
+	assem.dim = 3;
+	struct gaussian_kernel_system_assembly** assem_d_p;
+	cudaMalloc((void***)&assem_d_p, sizeof(struct gaussian_kernel_system_assembly*));
+//	cudaMemcpy(assem_d, &assem, sizeof(struct gaussian_kernel_system_assembly), cudaMemcpyHostToDevice);
+	
+	create_gaussian_kernel_system_assembly_object(assem_d_p, assem.points, assem.max_row_count_per_dgemv, assem.dim);
+
+	struct gaussian_kernel_system_assembly* assem_d;
+	cudaMemcpy(&assem_d, assem_d_p, sizeof(struct gaussian_kernel_system_assembly*), cudaMemcpyDeviceToHost);
+
+	A.data = (void*)assem_d;
 
 	// generate manufactured RHS
 	curandGenerateUniformDouble(gen, x.data, x.cur_proc_row_count);
+
 	mpla_generic_dgemv(&b, &A, &x, mpla_dgemv_core, &instance);
 
 	// fill initial solution vector by random numbers
 	curandGenerateUniformDouble(gen, x.data, x.cur_proc_row_count);
-	
+
 	// store initial solution vector in x_tmp
 	cudaMemcpy(x_tmp.data, x.data, sizeof(double)*x.cur_proc_row_count, cudaMemcpyDeviceToDevice);
 
@@ -128,6 +141,14 @@ int main(int argc, char* argv[])
 	printf("Time spent: %.10f\n", gpu_time/1000);
 
 	checkCUDAError("bla");
+
+	destroy_gaussian_kernel_system_assembly_object(assem_d_p);
+	cudaThreadSynchronize();
+	checkCUDAError("destroy_gaussian_kernel_system_assembly_object");
+
+	cudaFree(assem_d_p);
+
+//	cudaFree(assem_d);	
 
 	mpla_free_generic_matrix(&A, &instance);
 	mpla_free_vector(&x, &instance);

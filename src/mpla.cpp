@@ -652,6 +652,38 @@ void mpla_save_vector(struct mpla_vector* x, char* filename, struct mpla_instanc
 	MPI_Barrier(instance->comm);
 }
 
+void mpla_copy_distributed_vector_to_cpu(double* x_cpu, struct mpla_vector* x, struct mpla_instance* instance)
+{
+        // create sub-communicator for each process column
+        int remain_dims[2];
+        remain_dims[0]=1;
+        remain_dims[1]=0;
+        MPI_Comm column_comm;
+        MPI_Cart_sub(instance->comm, remain_dims, &column_comm);
+        int column_rank;
+        MPI_Comm_rank(column_comm, &column_rank);
+
+        // columnwise creation of the full vector
+        double* full_vector = x_cpu;
+        int* recvcounts = new int[instance->proc_rows];
+        int* displs = new int[instance->proc_rows];
+        for (int i=0; i<instance->proc_rows; i++)
+        {
+                recvcounts[i] = x->proc_row_count[i][instance->cur_proc_col];
+                displs[i] = x->proc_row_offset[i][instance->cur_proc_col];
+        }
+//        cudaMalloc((void**)&full_vector, sizeof(double)*x->vec_row_count);
+//        cudaThreadSynchronize();
+//        checkCUDAError("cudaMalloc");
+        MPI_Allgatherv(x->data, x->cur_proc_row_count, MPI_DOUBLE, full_vector, recvcounts, displs, MPI_DOUBLE, column_comm);
+
+        // memory cleanup
+        MPI_Comm_free(&column_comm);
+
+        MPI_Barrier(instance->comm);
+}
+
+
 void mpla_load_vector(struct mpla_vector* x, char* filename, struct mpla_instance* instance)
 {
         // reading full vector on all processes        
@@ -743,10 +775,10 @@ void mpla_generic_dgemv(struct mpla_vector* b, struct mpla_generic_matrix* A, st
 	// allocate redistributed vector
 	struct mpla_vector x_redist;
 	mpla_init_vector_for_block_rows(&x_redist, instance, x->vec_row_count);
-	
+
 	// redistribute input vector with row-block parallel distribution to column-block parallel distribution
 	mpla_redistribute_vector_for_generic_dgesv(&x_redist, x, A, instance);
-		
+	
 	// generic computation core: matrix-vector product
 	mpla_dgemv_core(b, A, &x_redist, instance);
 

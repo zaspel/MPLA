@@ -54,19 +54,54 @@
 #	g++ -c -I/usr/local/cuda/include -I/home/zaspel/libs/openmpi/include -o test_kernel_cg.o test_kernel_cg.cpp
 #	g++ -L/usr/local/cuda/lib64 -L/home/zaspel/libs/openmpi/lib -L. -o test_kernel_cg test_kernel_cg.o kernel.o -lcudart -lcurand -lmpi_cxx -lmpi -lmpla -lcublas
 
-all: h_matrix_test h_matrix_test_mrhs h_matrix_test_2d_parallel generate_quadrature_weights
+GSL_LIB_DIR = ${GSL_LIB}
+HMGLIB_DIR = /lustre/atlas/proj-shared/csc238/hmglib/src
+
+GPU_ARCH_SETTINGS = -arch=sm_60
+
+
+NVCC_CXXFLAGS += -O3 $(GPU_ARCH_SETTINGS)
+NVCC_CXXFLAGS += `pkg-config mpichcxx --cflags`
+CXXFLAGS += -O3
+NVCC_LDFLAGS += `pkg-config mpichcxx --libs`
+NVCC_LDFLAGS += -lmpich
+
+LDFLAGS_benchmarks += -lcurand -L. -lmpla -lcublas ${(GSL_LIB_DIR)
+
+all: generate_quadrature_weights benchmark_generic_system_cg benchmark_kernel_cg benchmark_cg
+
+hmglib: h_matrix_test h_matrix_test_mrhs h_matrix_test_2d_parallel
 
 libmpla.so: mpla.cpp mpla.h
-	CC -g -lcudart -fPIC -o libmpla.so --shared mpla.cpp
+	CC $(CXXFLAGS) -lcudart -fPIC -o libmpla.so -shared mpla.cpp
 
 hmglib_adapter.o: hmglib_adapter.h hmglib_adapter.cu
-	nvcc -g -O3 -c -arch=sm_35 -I$(MPICH_DIR)/include hmglib_adapter.cu -I/lustre/atlas/proj-shared/csc238/hmglib/src -o hmglib_adapter.o
+	nvcc $(NVCC_CXXFLAGS) -I$(HMGLIB_DIR) -c hmglib_adapter.cu -o hmglib_adapter.o
 
-kernel.o: kernel.h kernel.cu
-	nvcc -g -O3 -c -arch=sm_35 -I$(MPICH_DIR)/include kernel.cu -I/lustre/atlas/proj-shared/csc238/hmglib/src -o kernel.o
+kernel.o: kernel.h kernel.cu libmpla.so
+	nvcc $(NVCC_CXXFLAGS) -c kernel.cu -o kernel.o
+
+generic_system_adapter.o: generic_system_adapter.h generic_system_adapter.cu libmpla.so
+	nvcc $(NVCC_CXXFLAGS) -c generic_system_adapter.cu -o generic_system_adapter.o
+
+kernel_system_assembly.o: kernel_system_assembly.h kernel_system_assembly.cu generic_system_adapter.o libmpla.so
+	nvcc $(NVCC_CXXFLAGS) -c kernel_system_assembly.cu -o kernel_system_assembly.o
+
+benchmark_cg: benchmark_cg.cpp kernel.o libmpla.so
+	CC $(CXXFLAGS) $(LDFLAGS_benchmarks) kernel.o -o benchmark_cg benchmark_cg.cpp
+
+benchmark_kernel_cg: benchmark_kernel_cg.cpp kernel.o libmpla.so
+	CC $(CXXFLAGS) $(LDFLAGS_benchmarks) kernel.o -o benchmark_kernel_cg benchmark_kernel_cg.cpp
+
+benchmark_generic_system_cg: benchmark_generic_system_cg.cpp generic_system_adapter.o kernel_system_assembly.o libmpla.so
+	CC $(CXXFLAGS) $(LDFLAGS_benchmarks) generic_system_adapter.o kernel_system_assembly.o -o benchmark_generic_system_cg benchmark_generic_system_cg.cpp
+
+clean:
+	rm *.o *.so
+
 
 generate_quadrature_weights: generate_quadrature_weights.cu kernel.o libmpla.so
-	nvcc -g -O3 -arch=sm_35 -lcurand -L. -L/lustre/atlas/proj-shared/csc238/hmglib/src -lmpla -lhmglib -lcublas ${GSL_LIB} -I$(MPICH_DIR)/include -I/lustre/atlas/proj-shared/csc238/hmglib/src kernel.o -o generate_quadrature_weights generate_quadrature_weights.cu
+	nvcc $(NVCC_LDFLAGS) -L$(HMGLIB_DIR) -lmpla -lhmglib -lcublas ${GSL_LIB} -I$(MPICH_DIR)/include -I/lustre/atlas/proj-shared/csc238/hmglib/src kernel.o -o generate_quadrature_weights generate_quadrature_weights.cu
 
 h_matrix_test: h_matrix_test.cu hmglib_adapter.o libmpla.so
 	nvcc -g -O3 -arch=sm_35 -lcurand -L. -L/lustre/atlas/proj-shared/csc238/hmglib/src -lmpla -lhmglib -lcublas ${GSL_LIB} -I$(MPICH_DIR)/include -I/lustre/atlas/proj-shared/csc238/hmglib/src hmglib_adapter.o -o h_matrix_test h_matrix_test.cu
