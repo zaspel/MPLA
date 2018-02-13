@@ -20,6 +20,7 @@
 #include <cuda_runtime.h>
 #include <curand.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 int idx(int i, int j, int m, int n)
 {
