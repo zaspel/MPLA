@@ -1,9 +1,9 @@
-#ifndef system_assembly_h__
-#define system_assembly_h__
+#ifndef system_assembler_h__
+#define system_assembler_h__
 
 #include "mpla.h"
 
-class system_assembly
+class system_assembler
 {
 	public:
 		int max_row_count_per_dgemv;

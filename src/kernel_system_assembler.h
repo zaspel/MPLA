@@ -1,13 +1,13 @@
-#ifndef kernel_system_assembly_h__
-#define kernel_system_assembly_h__
+#ifndef kernel_system_assembler_h__
+#define kernel_system_assembler_h__
         
 
 
 #include "mpla.h"
-#include "system_assembly.h"
+#include "system_assembler.h"
 
 
-class gaussian_kernel_system_assembly : public system_assembly
+class gaussian_kernel_system_assembler : public system_assembler
 {
 	public:
 
@@ -49,8 +49,8 @@ class gaussian_kernel_system_assembly : public system_assembly
 
 };
 
- extern void create_gaussian_kernel_system_assembly_object(struct gaussian_kernel_system_assembly** assem, double** points, int max_row_count_per_dgemv, int dim);
+ extern void create_gaussian_kernel_system_assembler_object(struct gaussian_kernel_system_assembler** assem, double** points, int max_row_count_per_dgemv, int dim);
 
-extern void destroy_gaussian_kernel_system_assembly_object(struct gaussian_kernel_system_assembly** assem);
+extern void destroy_gaussian_kernel_system_assembler_object(struct gaussian_kernel_system_assembler** assem);
 
 #endif

@@ -3,8 +3,8 @@
 #include <curand.h>
 
 #include "generic_system_adapter.h"
-#include "kernel_system_assembly.h"
-__global__ void gen_generic_system_matrix(double* A, system_assembly* assem, int row_count, int col_count, int row_offset, int col_offset)
+#include "kernel_system_assembler.h"
+__global__ void gen_generic_system_matrix(double* A, system_assembler* assem, int row_count, int col_count, int row_offset, int col_offset)
 {
 	int idx = blockIdx.x*blockDim.x+threadIdx.x;
 	
@@ -23,7 +23,7 @@ __global__ void gen_generic_system_matrix(double* A, system_assembly* assem, int
 }
 
 
-__global__ void gen_generic_system_rhs(double* rhs, system_assembly* assem, int row_count, int row_offset)
+__global__ void gen_generic_system_rhs(double* rhs, system_assembler* assem, int row_count, int row_offset)
 {
 	int idx = blockIdx.x*blockDim.x+threadIdx.x;
 
@@ -41,7 +41,7 @@ void mpla_set_generic_system_rhs(struct mpla_vector* b, struct mpla_generic_matr
         int block_size = 1024;
         int grid_size = (A->cur_proc_row_count + block_size -1)/block_size;
 
-	system_assembly* assem = (system_assembly*)(A->data);
+	system_assembler* assem = (system_assembler*)(A->data);
 
         gen_generic_system_rhs<<<grid_size, block_size>>>(b->data, assem, A->cur_proc_row_count, A->cur_proc_row_offset);
         cudaThreadSynchronize();
@@ -59,10 +59,7 @@ void mpla_dgemv_core_generic_system_matrix_cublas(struct mpla_vector* b, struct 
 	int block_size = 1024;
 	int grid_size = (A->cur_proc_row_count*A->cur_proc_col_count + block_size -1)/block_size;
 
-//	double** points = ((struct kernel_matrix_data*)(A->data))->points;
-//	int dim = ((struct kernel_matrix_data*)(A->data))->dim;
-
-	system_assembly* assem = (system_assembly*)(A->data);
+	system_assembler* assem = (system_assembler*)(A->data);
 
 	gen_generic_system_matrix<<<grid_size, block_size>>>(Amat, assem, A->cur_proc_row_count, A->cur_proc_col_count, A->cur_proc_row_offset, A->cur_proc_col_offset);
 	cudaThreadSynchronize();
@@ -76,7 +73,7 @@ void mpla_dgemv_core_generic_system_matrix_cublas(struct mpla_vector* b, struct 
 
 }
 
-__global__ void get_max_row_count_per_dgemv_kernel(struct system_assembly* assem, int* max_row_count_per_dgemv)
+__global__ void get_max_row_count_per_dgemv_kernel(struct system_assembler* assem, int* max_row_count_per_dgemv)
 {
 	max_row_count_per_dgemv[0] = assem->max_row_count_per_dgemv;
 }
@@ -88,7 +85,7 @@ void mpla_dgemv_core_generic_system_matrix_streamed_cublas(struct mpla_vector* b
 	int* max_row_count_per_dgemv_d;
 	cudaMalloc((void**)&max_row_count_per_dgemv_d, sizeof(int));
 	checkCUDAError("bbbdf");
-	get_max_row_count_per_dgemv_kernel<<<1,1>>>((system_assembly*)A->data, max_row_count_per_dgemv_d);
+	get_max_row_count_per_dgemv_kernel<<<1,1>>>((system_assembler*)A->data, max_row_count_per_dgemv_d);
 	cudaThreadSynchronize();
 	checkCUDAError("fasdfasf");
 	int max_row_count_per_dgemv_h;
@@ -106,7 +103,7 @@ void mpla_dgemv_core_generic_system_matrix_streamed_cublas(struct mpla_vector* b
 	int block_size = 1024;
 	int grid_size = (max_row_count*A->cur_proc_col_count + block_size -1)/block_size;
 
-	system_assembly* assem = (system_assembly*)(A->data);
+	system_assembler* assem = (system_assembler*)(A->data);
 
 	int row_block_count = (A->cur_proc_row_count + max_row_count - 1) / max_row_count;
 	int curr_row_block_offset = A->cur_proc_row_offset;
@@ -138,20 +135,4 @@ void mpla_dgemv_core_generic_system_matrix_streamed_cublas(struct mpla_vector* b
 
 	cudaFree(Amat);
 }
-
-// __global__ void create_gaussian_kernel_system_assembly_object_kernel(struct gaussian_kernel_system_assembly** assem, double** points, int max_row_count_per_dgemv, int dim)
-// {
-//  	(*assem) = new gaussian_kernel_system_assembly();
-// 	(*assem)->points = points;
-// 	(*assem)->max_row_count_per_dgemv = max_row_count_per_dgemv;
-// 	(*assem)->dim = dim;
-// }
-// 
-// void create_gaussian_kernel_system_assembly_object(struct gaussian_kernel_system_assembly** assem, double** points, int max_row_count_per_dgemv, int dim)
-// {
-// 	create_gaussian_kernel_system_assembly_object_kernel<<<1,1>>>(assem, points, max_row_count_per_dgemv, dim);
-// 	cudaThreadSynchronize();
-// 	checkCUDAError("create_gaussian_kernel_system_assembly_object");
-// }
-// 
 

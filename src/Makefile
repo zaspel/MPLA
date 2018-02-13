@@ -96,8 +96,8 @@ kernel.o: kernel.h kernel.cu libmpla.so
 generic_system_adapter.o: generic_system_adapter.h generic_system_adapter.cu libmpla.so
 	$(NVCC) $(NVCC_CXXFLAGS) -dc generic_system_adapter.cu -o generic_system_adapter.o
 
-kernel_system_assembly.o: kernel_system_assembly.h kernel_system_assembly.cu generic_system_adapter.o libmpla.so
-	$(NVCC) $(NVCC_CXXFLAGS) -dc kernel_system_assembly.cu -o kernel_system_assembly.o
+kernel_system_assembler.o: kernel_system_assembler.h kernel_system_assembler.cu generic_system_adapter.o libmpla.so
+	$(NVCC) $(NVCC_CXXFLAGS) -dc kernel_system_assembler.cu -o kernel_system_assembler.o
 
 benchmark_cg: benchmark_cg.cpp kernel.o libmpla.so
 	$(CC) kernel.o -o benchmark_cg benchmark_cg.cpp $(CXXFLAGS) $(LDFLAGS_benchmarks) 
@@ -105,14 +105,14 @@ benchmark_cg: benchmark_cg.cpp kernel.o libmpla.so
 benchmark_kernel_cg: benchmark_kernel_cg.cpp kernel.o libmpla.so
 	$(CC) kernel.o -o benchmark_kernel_cg benchmark_kernel_cg.cpp $(CXXFLAGS) $(LDFLAGS_benchmarks) 
 
-generic_system_adapter_kernel_system_assembly_device.o: generic_system_adapter.o kernel_system_assembly.o 
-	$(NVCC) $(NVCC_CXXFLAGS) --device-link generic_system_adapter.o kernel_system_assembly.o -o generic_system_adapter_kernel_system_assembly_device.o
+generic_system_adapter_kernel_system_assembler_device.o: generic_system_adapter.o kernel_system_assembler.o 
+	$(NVCC) $(NVCC_CXXFLAGS) --device-link generic_system_adapter.o kernel_system_assembler.o -o generic_system_adapter_kernel_system_assembler_device.o
 
 benchmark_generic_system_cg.o: benchmark_generic_system_cg.cpp
 	$(CC) -c benchmark_generic_system_cg.cpp -o benchmark_generic_system_cg.o $(CXXFLAGS) $(LDFLAGS_benchmarks)
 
-benchmark_generic_system_cg: benchmark_generic_system_cg.o kernel_system_assembly.o generic_system_adapter.o generic_system_adapter_kernel_system_assembly_device.o libmpla.so
-	$(CC) kernel_system_assembly.o generic_system_adapter.o generic_system_adapter_kernel_system_assembly_device.o benchmark_generic_system_cg.o -o benchmark_generic_system_cg $(CXXFLAGS) $(LDFLAGS_benchmarks) 
+benchmark_generic_system_cg: benchmark_generic_system_cg.o kernel_system_assembler.o generic_system_adapter.o generic_system_adapter_kernel_system_assembler_device.o libmpla.so
+	$(CC) kernel_system_assembler.o generic_system_adapter.o generic_system_adapter_kernel_system_assembler_device.o benchmark_generic_system_cg.o -o benchmark_generic_system_cg $(CXXFLAGS) $(LDFLAGS_benchmarks) 
 clean:
 	rm *.o *.so
 

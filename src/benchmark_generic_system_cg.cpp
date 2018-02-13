@@ -24,7 +24,7 @@
 //#include "kernel.h"  // for now a dirty hack!!!
 
 #include "generic_system_adapter.h"
-#include "kernel_system_assembly.h"
+#include "kernel_system_assembler.h"
 
 int idx(int i, int j, int m, int n)
 {
@@ -92,18 +92,18 @@ int main(int argc, char* argv[])
 	cudaMemcpy(points, points_ptr_on_host, sizeof(double*)*3, cudaMemcpyHostToDevice);
 
 	// setup data structure with kernel matrix data
-	struct gaussian_kernel_system_assembly assem;
+	struct gaussian_kernel_system_assembler assem;
 	assem.points = points;
 	assem.max_row_count_per_dgemv = calculate_max_row_count( A.cur_proc_row_count, A.cur_proc_col_count);
 	assem.dim = 3;
-	struct gaussian_kernel_system_assembly** assem_d_p;
-	cudaMalloc((void***)&assem_d_p, sizeof(struct gaussian_kernel_system_assembly*));
-//	cudaMemcpy(assem_d, &assem, sizeof(struct gaussian_kernel_system_assembly), cudaMemcpyHostToDevice);
+	struct gaussian_kernel_system_assembler** assem_d_p;
+	cudaMalloc((void***)&assem_d_p, sizeof(struct gaussian_kernel_system_assembler*));
+//	cudaMemcpy(assem_d, &assem, sizeof(struct gaussian_kernel_system_assembler), cudaMemcpyHostToDevice);
 	
-	create_gaussian_kernel_system_assembly_object(assem_d_p, assem.points, assem.max_row_count_per_dgemv, assem.dim);
+	create_gaussian_kernel_system_assembler_object(assem_d_p, assem.points, assem.max_row_count_per_dgemv, assem.dim);
 
-	struct gaussian_kernel_system_assembly* assem_d;
-	cudaMemcpy(&assem_d, assem_d_p, sizeof(struct gaussian_kernel_system_assembly*), cudaMemcpyDeviceToHost);
+	struct gaussian_kernel_system_assembler* assem_d;
+	cudaMemcpy(&assem_d, assem_d_p, sizeof(struct gaussian_kernel_system_assembler*), cudaMemcpyDeviceToHost);
 
 	A.data = (void*)assem_d;
 
@@ -142,9 +142,9 @@ int main(int argc, char* argv[])
 
 	checkCUDAError("bla");
 
-	destroy_gaussian_kernel_system_assembly_object(assem_d_p);
+	destroy_gaussian_kernel_system_assembler_object(assem_d_p);
 	cudaThreadSynchronize();
-	checkCUDAError("destroy_gaussian_kernel_system_assembly_object");
+	checkCUDAError("destroy_gaussian_kernel_system_assembler_object");
 
 	cudaFree(assem_d_p);
 
