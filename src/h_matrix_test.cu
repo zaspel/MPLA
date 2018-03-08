@@ -124,7 +124,7 @@ int main(int argc, char* argv[])
 
 	// init MPLA
 	struct mpla_instance instance;
-	mpla_init_instance(&instance, MPI_COMM_WORLD);
+	mpla_init_instance_block_rows(&instance, MPI_COMM_WORLD);
 
 	if (instance.is_parent)
 		printf("Running on %d processors.\n",instance.proc_count);
