@@ -3,7 +3,7 @@
 
 #include "hmglib_adapter.h"
 
-void mpla_init_hmglib(struct mpla_generic_matrix* A, int global_point_count[2], double** all_coords[2], int dim, int bits, int c_leaf, int k, double epsilon, struct mpla_instance* instance)
+void mpla_init_hmglib(struct mpla_generic_matrix* A, int global_point_count[2], double** all_coords[2], unsigned int* all_point_ids[2], struct system_assembler* assem, double eta, int dim, int bits, int c_leaf, int k, int max_batched_dense_size, int max_batched_aca_size, struct mpla_instance* instance)
 {
 	// get H matrix data structure
 	struct h_matrix_data* data = (struct h_matrix_data*)A->data;
@@ -12,11 +12,13 @@ void mpla_init_hmglib(struct mpla_generic_matrix* A, int global_point_count[2], 
 	local_point_count[0] = A->cur_proc_row_count;
 	local_point_count[1] = A->cur_proc_col_count;
 
+	printf("localpointcount %d %d\n", local_point_count[0], local_point_count[1]);
+
         // initialize data structure
         init_h_matrix_data(data, local_point_count, dim, bits);
 
         // set balance  
-        data->eta=1.0;
+        data->eta=eta;
 
         // set maximum level
         data->max_level=50; // DEBUG
@@ -27,21 +29,43 @@ void mpla_init_hmglib(struct mpla_generic_matrix* A, int global_point_count[2], 
         // set rank in ACA
         data->k = k;
 
-        // set threshold for ACA (currently not use)
-        data->epsilon = epsilon;
 
-	// copy global coordinates to local coordinate lists
+//        // set threshold for ACA (currently not use)
+//        data->epsilon = epsilon;
+
+	// set batching sizes
+	data->max_batched_dense_size = max_batched_dense_size;
+	data->max_batched_aca_size = max_batched_aca_size;
+
+	printf("blub\n");
+	fflush(stdout);
+
+	// copy global coordinates & IDs to local coordinate & IDs lists
 	for (int d=0; d<dim; d++)
 	{
 		cudaMemcpy(data->coords_d[0][d], &(all_coords[0][d][A->cur_proc_row_offset]), local_point_count[0]*sizeof(double), cudaMemcpyDeviceToDevice);
 		cudaMemcpy(data->coords_d[1][d], &(all_coords[1][d][A->cur_proc_col_offset]), local_point_count[1]*sizeof(double), cudaMemcpyDeviceToDevice);
+		checkCUDAError("cudaMemcpy");
 	}
+	
+	printf("blub2\n");
+	fflush(stdout);
+
+	cudaMemcpy(data->point_ids_d[0], &(all_point_ids[0][A->cur_proc_row_offset]), local_point_count[0]*sizeof(unsigned int), cudaMemcpyDeviceToDevice);
+	cudaMemcpy(data->point_ids_d[1], &(all_point_ids[1][A->cur_proc_col_offset]), local_point_count[1]*sizeof(unsigned int), cudaMemcpyDeviceToDevice);
+	checkCUDAError("cudaMemcpy point ids");
+	
+	printf("blub3\n");
+	fflush(stdout);
 
         // run setup of H matrix
         setup_h_matrix(data);
+
+	// set system matrix assembler
+	data->assem = assem;
 }
 
-void mpla_init_hmglib_coords_from_host(struct mpla_generic_matrix* A, int global_point_count[2], double** all_coords[2], int dim, int bits, int c_leaf, int k, double epsilon, struct mpla_instance* instance)
+void mpla_init_hmglib_coords_from_host(struct mpla_generic_matrix* A, int global_point_count[2], double** all_coords[2], struct system_assembler* assem, double eta, int dim, int bits, int c_leaf, int k, int max_batched_dense_size, int max_batched_aca_size, struct mpla_instance* instance)
 {
         // get H matrix data structure
         struct h_matrix_data* data = (struct h_matrix_data*)A->data;
@@ -54,7 +78,7 @@ void mpla_init_hmglib_coords_from_host(struct mpla_generic_matrix* A, int global
         init_h_matrix_data(data, local_point_count, dim, bits);
 
         // set balance  
-        data->eta=1.0;
+        data->eta=eta;
 
         // set maximum level
         data->max_level=50; // DEBUG
@@ -65,8 +89,15 @@ void mpla_init_hmglib_coords_from_host(struct mpla_generic_matrix* A, int global
         // set rank in ACA
         data->k = k;
 
-        // set threshold for ACA (currently not use)
-        data->epsilon = epsilon;
+	// set system matrix assembler
+	data->assem = assem;
+
+//        // set threshold for ACA (currently not use)
+//        data->epsilon = epsilon;
+
+        // set batching sizes
+        data->max_batched_dense_size = max_batched_dense_size;
+        data->max_batched_aca_size = max_batched_aca_size;
 
         // copy global coordinates to local coordinate lists
         for (int d=0; d<dim; d++)

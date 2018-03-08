@@ -24,6 +24,7 @@
 
 #include <hmglib.h>
 #include "hmglib_adapter.h"
+#include <kernel_system_assembler.h>
 
 int idx(int i, int j, int m, int n)
 {
@@ -68,9 +69,15 @@ int main(int argc, char* argv[])
 	
 	int max_iter = 1000;
 
+	double eta = 1.5;
+
+	int max_batched_dense_size = (int) pow(2,24);
+	int max_batched_aca_size = (int) pow(2,24);
+
+
 	if (argc==1)
 	{
-		printf("%s <n> <dim> <tolerance> <restart> <checkpoint_iter> <k> <c_leaf> <power_of_epsilon>\n",argv[0]);
+		printf("%s <n> <dim> <tolerance> <restart> <checkpoint_iter> <k> <c_leaf> <max_iter> <eta> <max_batched_dense_size> <max_batched_aca_size>\n",argv[0]);
 		exit(0);
 	}
 	
@@ -95,10 +102,16 @@ int main(int argc, char* argv[])
 		c_leaf = atoi(argv[7]);
 
 	if (argc>8)
-		epsilon = pow(10.0, (double)atoi(argv[8]));
+		max_iter = atoi(argv[8]);
 
 	if (argc>9)
-		max_iter = atoi(argv[9]);
+		eta = atof(argv[9]);
+
+	if (argc>10)
+		max_batched_dense_size = atoi(argv[10]);
+
+	if (argc>11)
+		max_batched_aca_size = atoi(argv[11]);
 
 	int bits = (dim==2) ? 32 : 20;	
 
@@ -158,35 +171,66 @@ int main(int argc, char* argv[])
 	delete [] rand_pt;
 
 	
-	double** points_ptr_on_host;
-	points_ptr_on_host = new double*[dim];
-	for (int d=0; d<dim; d++)
+	double** points_ptr_on_host[2];
+	double** points[2];
+	for (int i=0; i<2; i++)
 	{
-		cudaMalloc((void**)&(points_ptr_on_host[d]), sizeof(double)*n);
-		cudaMemcpy(points_ptr_on_host[d], points_host[d], sizeof(double)*n, cudaMemcpyHostToDevice);
+		points_ptr_on_host[i] = new double*[dim];
+		for (int d=0; d<dim; d++)
+		{
+			cudaMalloc((void**)&(points_ptr_on_host[i][d]), sizeof(double)*n);
+			cudaMemcpy(points_ptr_on_host[i][d], points_host[d], sizeof(double)*n, cudaMemcpyHostToDevice);
+		}
+		cudaMalloc((void**)&(points[i]), sizeof(double*)*dim);
+		cudaMemcpy(points[i], points_ptr_on_host[i], sizeof(double*)*dim, cudaMemcpyHostToDevice);
 	}
-	double** points;
-	cudaMalloc((void**)&points, sizeof(double*)*dim);
-	cudaMemcpy(points, points_ptr_on_host, sizeof(double*)*dim, cudaMemcpyHostToDevice);
+
+	unsigned int* point_ids_h[2];
+	for (int i=0; i<2; i++)
+	{
+		point_ids_h[i] = new unsigned int[n];
+		for (int j=0; j<n; j++)
+			point_ids_h[i][j] = j;
+	}
+
+	unsigned int* point_ids_d_ptr_on_host[2];
+	for (int i=0; i<2; i++)
+	{
+		cudaMalloc((void**)&(point_ids_d_ptr_on_host[i]), sizeof(unsigned int)*n);
+		cudaMemcpy(point_ids_d_ptr_on_host[i], point_ids_h[i], sizeof(unsigned int)*n, cudaMemcpyHostToDevice);	
+	}
+
+	delete [] point_ids_h[0];
+	delete [] point_ids_h[1];
 
 
 	// setup data structure with hmglib data
 	struct h_matrix_data data;
 	A.data = (void*)&data;
 	double** global_coords[2];
-	global_coords[0] = points_ptr_on_host;
-	global_coords[1] = points_ptr_on_host;
+	global_coords[0] = points_ptr_on_host[0];
+	global_coords[1] = points_ptr_on_host[1];
 	int global_point_count[2];
 	global_point_count[0] = n;
 	global_point_count[1] = n;
 
+        // setup kernel matrix assembler
+        double regularization = 0.0;
+        struct gaussian_kernel_system_assembler assem;
+        struct gaussian_kernel_system_assembler** assem_d_p;
+        cudaMalloc((void***)&assem_d_p, sizeof(struct gaussian_kernel_system_assembler*));
+        create_gaussian_kernel_system_assembler_object(assem_d_p, regularization);
+        struct gaussian_kernel_system_assembler* assem_d;
+        cudaMemcpy(&assem_d, assem_d_p, sizeof(struct gaussian_kernel_system_assembler*), cudaMemcpyDeviceToHost);
+
+	// setup H matrix
 	if (instance.is_parent)
 		TIME_test_start;
-	mpla_init_hmglib(&A, global_point_count, global_coords, dim, bits, c_leaf, k, epsilon, &instance);
+	mpla_init_hmglib(&A, global_point_count, global_coords, point_ids_d_ptr_on_host, assem_d, eta, dim, bits, c_leaf, k, max_batched_dense_size, max_batched_aca_size, &instance);
 	MPI_Barrier(instance.comm);
 	if (instance.is_parent)
 		TIME_test_stop("Setup time");
-  
+ 
 	// generate RHS
 	set_gaussian_kernel_rhs(b.data, &data);
 
@@ -210,6 +254,7 @@ int main(int argc, char* argv[])
 	if (instance.is_parent)
 		TIME_test_start;
 	mpla_generic_conjugate_gradient_with_checkpoint_restart(&b, &A, &x, max_iter, tol, mpla_dgemv_core_hmatrix, iterations_until_checkpoint, restart, &instance);
+
 	MPI_Barrier(instance.comm);
 	if (instance.is_parent)
 		TIME_test_stop("Solve time");
@@ -229,19 +274,28 @@ int main(int argc, char* argv[])
 
 	checkCUDAError("bla");
 
+        // cleanup of assembler
+        destroy_gaussian_kernel_system_assembler_object(assem_d_p);;
+        cudaFree(assem_d_p);
+
+
 	mpla_destroy_hmglib(&A, &instance);
 	mpla_free_generic_matrix(&A, &instance);
 	mpla_free_vector(&x, &instance);
 	mpla_free_vector(&x_tmp, &instance);
 	mpla_free_vector(&b, &instance);
 
-	
-	for (int d=0; d<dim; d++)
+	for (int i=0; i<2; i++)
 	{
-		cudaFree(points_ptr_on_host[d]);
+		for (int d=0; d<dim; d++)
+		{
+			cudaFree(points_ptr_on_host[i][d]);
+		}
+		cudaFree(points[i]);
+		delete [] points_ptr_on_host[i];
+
+		cudaFree(point_ids_d_ptr_on_host[i]);
 	}
-	cudaFree(points);
-	delete [] points_ptr_on_host;
 
 	mpla_destroy_instance(&instance);
 	

@@ -62,7 +62,7 @@ CC = /users/staff/dmi-dmi/zaspel/opt/openmpi/bin/mpiCC
 GSL_LIB_DIR = /users/staff/dmi-dmi/zaspel/opt/gsl
 HMGLIB_DIR = /users/staff/dmi-dmi/zaspel/hmglib/src
 
-GPU_ARCH_SETTINGS = -arch=sm_60
+GPU_ARCH_SETTINGS = --gpu-architecture=sm_61 
 
 MPI_CFLAGS = -I/users/staff/dmi-dmi/zaspel/opt/openmpi/include
 MPI_LIBS = -L/users/staff/dmi-dmi/zaspel/opt/openmpi/lib -lmpi
@@ -82,12 +82,12 @@ LDFLAGS_benchmarks_with_hmglib += $(LDFLAGS_benchmarks) -L$(HMGLIB_DIR) -L/users
 
 all: generate_quadrature_weights benchmark_generic_system_cg benchmark_kernel_cg benchmark_cg
 
-hmglib: h_matrix_test h_matrix_test_mrhs h_matrix_test_2d_parallel
+hmglib: h_matrix_test # h_matrix_test_mrhs h_matrix_test_2d_parallel
 
 libmpla.so: mpla.cpp mpla.h
 	$(CC) $(CXXFLAGS) -lcudart -fPIC -o libmpla.so -shared mpla.cpp
 
-hmglib_adapter.o: hmglib_adapter.h hmglib_adapter.cu
+hmglib_adapter.o: hmglib_adapter.h hmglib_adapter.cu $(HMGLIB_DIR)/libhmglib.so
 	$(NVCC) $(NVCC_CXXFLAGS_with_hmglib) -c hmglib_adapter.cu -o hmglib_adapter.o
 
 kernel.o: kernel.h kernel.cu libmpla.so
