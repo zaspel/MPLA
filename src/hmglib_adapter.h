@@ -18,7 +18,7 @@
 #include "mpla.h"
 #include <stdio.h>
 
-extern void mpla_init_hmglib(struct mpla_generic_matrix* A, int global_point_count[2], double** all_coords[2], unsigned int* all_point_ids[2], struct system_assembler* assem, double eta, int dim, int bits, int c_leaf, int k, int max_batched_dense_size, int max_batched_aca_size, struct mpla_instance* instance);
+extern void mpla_init_hmglib(struct mpla_generic_matrix* A, int global_point_count[2], double** all_coords[2], unsigned int* all_point_ids[2], struct system_assembler* assem, double eta, int dim, int bits, int c_leaf, int k, char root_level_set_1, char root_level_set_2, int max_batched_dense_size, int max_batched_aca_size, struct mpla_instance* instance);
 
 extern void mpla_init_hmglib_coords_from_host(struct mpla_generic_matrix* A, int global_point_count[2], double** all_coords[2], struct system_assembler* assem, double eta, int dim, int bits, int c_leaf, int k, int max_batched_dense_size, int max_batched_aca_size, struct mpla_instance* instance);
 

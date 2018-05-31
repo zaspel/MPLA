@@ -28,8 +28,6 @@ void info()
 	printf("Hello world\n");
 }
 
-
-
 void mpla_init_instance(struct mpla_instance* instance, MPI_Comm comm)
 {
 	instance->comm = comm;	
@@ -63,6 +61,7 @@ void mpla_init_instance(struct mpla_instance* instance, MPI_Comm comm)
 	cublasCreate(&(instance->cublas_handle));
 	
 }
+
 
 void mpla_init_instance_block_rows(struct mpla_instance* instance, MPI_Comm comm)
 {
@@ -863,7 +862,8 @@ void mpla_generic_conjugate_gradient(struct mpla_vector* b, struct mpla_generic_
 		mpla_ddot(&t2, &r, &r, instance);
 		beta = t2 / t1;
 
-//		printf("%d: %e\n", k, sqrt(t2/(double)(x->vec_row_count)));
+		if ((k%10 == 0) && (instance->is_parent))
+			printf("%d: %e\n", k, sqrt(t2/(double)(x->vec_row_count)));
 
 		if (sqrt(t2/(double)(x->vec_row_count))<epsilon)
 		{

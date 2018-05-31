@@ -223,10 +223,14 @@ int main(int argc, char* argv[])
         struct gaussian_kernel_system_assembler* assem_d;
         cudaMemcpy(&assem_d, assem_d_p, sizeof(struct gaussian_kernel_system_assembler*), cudaMemcpyDeviceToHost);
 
+
+	char root_level_set_1 = char(ceil(log(instance.proc_rows)/log(2)));
+	char root_level_set_2 = char(ceil(log(instance.proc_cols)/log(2)));
+
 	// setup H matrix
 	if (instance.is_parent)
 		TIME_test_start;
-	mpla_init_hmglib(&A, global_point_count, global_coords, point_ids_d_ptr_on_host, assem_d, eta, dim, bits, c_leaf, k, max_batched_dense_size, max_batched_aca_size, &instance);
+	mpla_init_hmglib(&A, global_point_count, global_coords, point_ids_d_ptr_on_host, assem_d, eta, dim, bits, c_leaf, k, root_level_set_1, root_level_set_2, max_batched_dense_size, max_batched_aca_size, &instance);
 	MPI_Barrier(instance.comm);
 	if (instance.is_parent)
 		TIME_test_stop("Setup time");
